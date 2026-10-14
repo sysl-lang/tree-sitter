@@ -1,0 +1,225 @@
+module sh.sysl.treesitter
+
+import sh.sysl.treesitter.c
+import sysl.buf.{Buf, buf}
+import sysl.text.from_utf8_lossy
+
+/** A syntax tree, and the text it was parsed from.
+ *
+ * **The text is held here** so that `Node.text` needs nothing passed to it. A tree from
+ * `Parser.parse_with` holds `""`, since the text was the callback's.
+ */
+struct Tree
+    private[treesitter] raw: *c.Tree
+    private[treesitter] source: string
+
+    /** The outermost node. */
+    root(&self) -> Node = Node(c.tree_root_node(self.raw), self)
+
+    /** The text the tree was parsed from. */
+    text(*self) -> string = self.source
+
+    /** The grammar the tree was parsed with. */
+    language(*self) -> Language = Language(c.tree_language(self.raw))
+
+    /** Tells the tree what changed, so the next `Parser.parse` given it as the old tree reuses what
+     * did not. The tree's nodes are moved to their new positions; its text is not changed, since the
+     * new text is the next parse's.
+     */
+    edit(*self, e: Edit)
+        var ce = c_edit(e)
+
+        c.tree_edit(self.raw, &ce)
+
+    /** The ranges whose syntax differs between this tree, edited, and `new`, parsed from it. */
+    changed_ranges(*self, new: &Tree) -> Buf[Span]
+        var n: u32 = 0
+        val p = c.tree_get_changed_ranges(self.raw, new.raw, &n)
+        var out: Buf[Span] = buf()
+
+        for i in 0..<n
+            out.push(range_of(p[i]))
+
+        c.free(ptr_cast(p))
+        out
+
+    /** An independent copy, which may be edited and re-parsed without touching this one. */
+    copy(*self) -> &Tree = Tree(c.tree_copy(self.raw), self.source)
+end Tree
+
+impl Drop for Tree
+    drop(self) = c.tree_delete(self.raw)
+
+/** A node of a tree.
+ *
+ * tree-sitter's node is four words naming a place in a tree it does not own; this one also holds
+ * the `&Tree`, so a node outliving every other name for its tree keeps the tree alive rather than
+ * pointing into freed memory.
+ *
+ * Where C answers a null node — no parent, no such child — this answers `None`.
+ */
+struct Node
+    private[treesitter] raw: c.Node
+    private[treesitter] tree: &Tree
+
+    /** The node's kind: `"object"`, or the literal text of an anonymous one, like `"["`. */
+    kind(self) -> string = text_of(c.node_type(self.raw))
+
+    /** The kind the grammar wrote before aliasing renamed it. */
+    grammar_kind(self) -> string = text_of(c.node_grammar_type(self.raw))
+
+    symbol(self) -> u16 = c.node_symbol(self.raw)
+
+    /** Whether the grammar names this node, as opposed to a literal token. */
+    is_named(self) -> bool = c.node_is_named(self.raw)
+
+    /** Whether the parser inserted it to recover from an error, with no text behind it. */
+    is_missing(self) -> bool = c.node_is_missing(self.raw)
+
+    /** Whether it is something the grammar allows anywhere, like a comment. */
+    is_extra(self) -> bool = c.node_is_extra(self.raw)
+
+    /** Whether this node is an `ERROR`. */
+    is_error(self) -> bool = c.node_is_error(self.raw)
+
+    /** Whether this node or anything under it is an error or missing. */
+    has_error(self) -> bool = c.node_has_error(self.raw)
+
+    /** Whether an edit touched it since the parse. */
+    has_changes(self) -> bool = c.node_has_changes(self.raw)
+
+    start_byte(self) -> u32 = c.node_start_byte(self.raw)
+
+    end_byte(self) -> u32 = c.node_end_byte(self.raw)
+
+    start(self) -> Point = point_of(c.node_start_point(self.raw))
+
+    end(self) -> Point = point_of(c.node_end_point(self.raw))
+
+    span(self) -> Span = Span(self.start(), self.end(), self.start_byte(), self.end_byte())
+
+    /** The text the node covers, out of the text its tree was parsed from. */
+    text(self) -> string = self.text_in(self.tree.source)
+
+    /** The text the node covers, out of `source` — for a tree from `parse_with`. */
+    text_in(self, source: string) -> string
+        val b = source.bytes
+        val end = usize(self.end_byte())
+
+        if end > b.len then return ""
+
+        from_utf8_lossy(b[usize(self.start_byte())..<end])
+
+    /** The node as an S-expression, named nodes only, fields labelled: `(array (number) (number))`. */
+    sexp(self) -> string
+        val p = c.node_string(self.raw)
+        val s = text_of(p)
+
+        c.free(p)
+        s
+
+    parent(self) -> Option[Node] = self.wrap(c.node_parent(self.raw))
+
+    child_count(self) -> u32 = c.node_child_count(self.raw)
+
+    child(self, i: u32) -> Option[Node] = self.wrap(c.node_child(self.raw, i))
+
+    named_child_count(self) -> u32 = c.node_named_child_count(self.raw)
+
+    named_child(self, i: u32) -> Option[Node] = self.wrap(c.node_named_child(self.raw, i))
+
+    /** Every child, named and anonymous, in order. */
+    children(self) -> Buf[Node]
+        var out: Buf[Node] = buf()
+
+        for i in 0..<self.child_count()
+            out.push(Node(c.node_child(self.raw, i), self.tree))
+
+        out
+
+    /** The named children, in order. */
+    named_children(self) -> Buf[Node]
+        var out: Buf[Node] = buf()
+
+        for i in 0..<self.named_child_count()
+            out.push(Node(c.node_named_child(self.raw, i), self.tree))
+
+        out
+
+    /** The child under field `name`, like `key` of a JSON `pair`. */
+    child_by_field(self, name: string) -> Option[Node] =
+        self.wrap(c.node_child_by_field_name(self.raw, bytes_ptr(name), u32(name.len)))
+
+    /** The field the `i`th child sits under, if any. */
+    field_name_for_child(self, i: u32) -> Option[string] =
+        text_or_none(c.node_field_name_for_child(self.raw, i))
+
+    next_sibling(self) -> Option[Node] = self.wrap(c.node_next_sibling(self.raw))
+
+    prev_sibling(self) -> Option[Node] = self.wrap(c.node_prev_sibling(self.raw))
+
+    next_named_sibling(self) -> Option[Node] = self.wrap(c.node_next_named_sibling(self.raw))
+
+    prev_named_sibling(self) -> Option[Node] = self.wrap(c.node_prev_named_sibling(self.raw))
+
+    /** How many nodes are in this subtree, this one included. */
+    descendant_count(self) -> u32 = c.node_descendant_count(self.raw)
+
+    /** The smallest node covering bytes `start..<end`. */
+    descendant_for_bytes(self, start: u32, end: u32) -> Option[Node] =
+        self.wrap(c.node_descendant_for_byte_range(self.raw, start, end))
+
+    /** The smallest named node covering bytes `start..<end`. */
+    named_descendant_for_bytes(self, start: u32, end: u32) -> Option[Node] =
+        self.wrap(c.node_named_descendant_for_byte_range(self.raw, start, end))
+
+    /** A cursor starting at this node, the cheap way to walk a large subtree. */
+    walk(self) -> &Cursor = Cursor(c.tree_cursor_new(self.raw), self.tree)
+
+    private wrap(self, n: c.Node) -> Option[Node] =
+        if c.node_is_null(n) then None else Some(Node(n, self.tree))
+end Node
+
+impl Eq for Node
+    eq(self, rhs: Node) -> bool = c.node_eq(self.raw, rhs.raw)
+
+/** A cursor over a tree: each move answers whether there was somewhere to go. */
+struct Cursor
+    private raw: c.TreeCursor
+    private tree: &Tree
+
+    node(*self) -> Node = Node(c.tree_cursor_current_node(&self.raw), self.tree)
+
+    /** The field the current node sits under in its parent, if any. */
+    field_name(*self) -> Option[string] = text_or_none(c.tree_cursor_current_field_name(&self.raw))
+
+    /** How far below the cursor's starting node it is. */
+    depth(*self) -> u32 = c.tree_cursor_current_depth(&self.raw)
+
+    goto_first_child(*self) -> bool = c.tree_cursor_goto_first_child(&self.raw)
+
+    goto_last_child(*self) -> bool = c.tree_cursor_goto_last_child(&self.raw)
+
+    goto_next_sibling(*self) -> bool = c.tree_cursor_goto_next_sibling(&self.raw)
+
+    goto_previous_sibling(*self) -> bool = c.tree_cursor_goto_previous_sibling(&self.raw)
+
+    goto_parent(*self) -> bool = c.tree_cursor_goto_parent(&self.raw)
+
+    /** Moves to the first child extending past byte `b`, answering its index. */
+    goto_first_child_for_byte(*self, b: u32) -> Option[u32]
+        val i = c.tree_cursor_goto_first_child_for_byte(&self.raw, b)
+
+        if i < 0 then None else Some(u32(i))
+
+    /** Starts again at `n`, which must be of the same tree. */
+    reset(*self, n: Node) = c.tree_cursor_reset(&self.raw, n.raw)
+end Cursor
+
+// `ts_tree_cursor_delete` frees the cursor's stack through the pointer inside the record, which a
+// copy carries unchanged; the box is being destroyed either way.
+impl Drop for Cursor
+    drop(self)
+        var raw = self.raw
+
+        c.tree_cursor_delete(&raw)

@@ -1,0 +1,37 @@
+module sh.sysl.treesitter.tests
+@tests
+
+// The README's example, verbatim, so that the README cannot drift from what compiles.
+
+import sh.sysl.treesitter.{parser, query, replacement, describe}
+import sh.sysl.treesitter.json.json_language
+
+example() -> Result[unit, string]
+    val p = parser()
+
+    p.set_language(json_language()).map_err(describe)?
+
+    val text = "{\"name\": \"tree\", \"size\": 3}"
+    val tree = p.parse(text).map_err(describe)?
+
+    assert_eq(tree.root().sexp(), "(document (object (pair key: (string (string_content)) " +
+              "value: (string (string_content))) (pair key: (string (string_content)) value: (number))))", "")
+
+    // Every key, through a query.
+    val q = query(json_language(), "(pair key: (string (string_content) @key))")
+        .map_err((e) -> s"query error at byte ${e.offset}")?
+    val keys = q.captures(tree.root())
+
+    assert_eq(keys[0].node.text(), "name", "")
+    assert_eq(keys[1].node.text(), "size", "")
+
+    // Change `3` to `42` and re-parse, reusing the old tree.
+    tree.edit(replacement(text, 25, 26, "42"))
+
+    val again = p.parse("{\"name\": \"tree\", \"size\": 42}", Some(tree)).map_err(describe)?
+
+    assert_eq(again.root().named_descendant_for_bytes(25, 27).expect("a node").text(), "42", "")
+    Ok(())
+
+@test
+the_readme_example_runs() = example().expect("the example")

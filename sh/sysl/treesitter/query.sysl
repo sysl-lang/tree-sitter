@@ -1,0 +1,298 @@
+module sh.sysl.treesitter
+
+import sh.sysl.treesitter.c
+import sysl.buf.{Buf, buf}
+import sysl.text.from_utf8_lossy
+
+// ## A query
+//
+// A query is a list of S-expression patterns with `@captures`, compiled against one language, and
+// run over a node by a `QueryCursor`. tree-sitter matches structure only: the `#eq?`-style
+// predicates a pattern carries are handed over as data (`Query.predicates`), and the common text
+// ones are evaluated by `Query.text_predicates_hold`.
+
+/** Why a query did not compile. */
+enum QueryErrorKind
+    Syntax
+    UnknownNodeType
+    UnknownField
+    UnknownCapture
+    Structure
+    LanguageMismatch
+
+/** Why a query did not compile, and where: `offset` is a byte offset into the query's source, and
+ * `at` the same place as a zero-based row and byte column.
+ */
+struct QueryError
+    kind: QueryErrorKind
+    offset: u32
+    at: Point
+
+/** How many times a capture may occur in one match of a pattern. */
+enum Quantifier
+    Zero
+    ZeroOrOne
+    ZeroOrMore
+    One
+    OneOrMore
+
+/** One argument of a predicate. */
+enum PredicateArg
+    /** `@name`, by its capture index. */
+    CaptureArg(id: u32, name: string)
+
+    /** A literal, quoted or bare. */
+    TextArg(text: string)
+
+/** A predicate as the pattern wrote it: `(#eq? @k "a")` is `Predicate("eq?", [CaptureArg(0, "k"),
+ * TextArg("a")])`.
+ */
+struct Predicate
+    name: string
+    args: Buf[PredicateArg]
+
+/** One capture of a match: the node, and which `@capture` it is. */
+struct Capture
+    node: Node
+    index: u32
+
+/** One match of one pattern. */
+struct Match
+    id: u32
+    pattern: u32
+    captures: Buf[Capture]
+
+/** A compiled query. */
+struct Query
+    private[treesitter] raw: *c.Query
+
+    pattern_count(*self) -> u32 = c.query_pattern_count(self.raw)
+
+    capture_count(*self) -> u32 = c.query_capture_count(self.raw)
+
+    string_count(*self) -> u32 = c.query_string_count(self.raw)
+
+    /** The name of capture `i`, without its `@`. */
+    capture_name(*self, i: u32) -> string
+        var n: u32 = 0
+        val p = c.query_capture_name_for_id(self.raw, i, &n)
+
+        sized_text(p, n)
+
+    /** The index of capture `name`. */
+    capture_index(*self, name: string) -> Option[u32]
+        for i in 0..<self.capture_count()
+            if self.capture_name(i) == name then return Some(i)
+
+        None
+
+    /** String literal `i` of the query, as predicates refer to them. */
+    string_value(*self, i: u32) -> string
+        var n: u32 = 0
+        val p = c.query_string_value_for_id(self.raw, i, &n)
+
+        sized_text(p, n)
+
+    /** Where pattern `i` starts in the query's source. */
+    start_byte_for_pattern(*self, i: u32) -> u32 = c.query_start_byte_for_pattern(self.raw, i)
+
+    quantifier(*self, pattern: u32, capture: u32) -> Quantifier
+        val q = c.query_capture_quantifier_for_id(self.raw, pattern, capture)
+
+        if q == c.QUANTIFIER_ZERO then Zero
+        elif q == c.QUANTIFIER_ZERO_OR_ONE then ZeroOrOne
+        elif q == c.QUANTIFIER_ZERO_OR_MORE then ZeroOrMore
+        elif q == c.QUANTIFIER_ONE then One
+        else OneOrMore
+
+    /** The predicates pattern `i` carries, in order. */
+    predicates(*self, pattern: u32) -> Buf[Predicate]
+        var n: u32 = 0
+        val steps = c.query_predicates_for_pattern(self.raw, pattern, &n)
+        var out: Buf[Predicate] = buf()
+        var name = ""
+        var args: Buf[PredicateArg] = buf()
+        var fresh = true
+
+        for i in 0..<n
+            val s = steps[i]
+
+            if s.kind == c.STEP_DONE
+                out.push(Predicate(name, args))
+                args = buf()
+                fresh = true
+            elif fresh
+                name = self.string_value(s.value_id)
+                fresh = false
+            elif s.kind == c.STEP_CAPTURE
+                args.push(CaptureArg(s.value_id, self.capture_name(s.value_id)))
+            else
+                args.push(TextArg(self.string_value(s.value_id)))
+
+        out
+    end predicates
+
+    /** Whether `m` satisfies its pattern's `#eq?`, `#not-eq?`, `#any-of?` and `#not-any-of?`
+     * predicates, comparing node text. Any other predicate is left to the caller and counts as
+     * holding here.
+     */
+    text_predicates_hold(*self, m: Match) -> bool
+        for p in self.predicates(m.pattern).view()
+            val texts = arg_texts(m, p.args)
+
+            if texts.len() == 0 then continue
+
+            val first = texts[0]
+            var any = false
+
+            for i in 1..<texts.len()
+                if texts[i] == first then any = true
+
+            val all = texts.len() > 1 && all_equal(texts)
+
+            if p.name == "eq?" && !all then return false
+            if p.name == "not-eq?" && all then return false
+            if p.name == "any-of?" && !any then return false
+            if p.name == "not-any-of?" && any then return false
+
+        true
+    end text_predicates_hold
+
+    /** Turns capture `name` off: no match reports it again. */
+    disable_capture(*self, name: string) =
+        c.query_disable_capture(self.raw, bytes_ptr(name), u32(name.len))
+
+    /** Turns pattern `i` off. */
+    disable_pattern(*self, i: u32) = c.query_disable_pattern(self.raw, i)
+
+    /** Every match under `n`, in order. */
+    matches(&self, n: Node) -> Buf[Match]
+        val qc = query_cursor()
+        var out: Buf[Match] = buf()
+
+        qc.exec(self, n)
+
+        loop
+            qc.next_match() match
+                Some(m) -> out.push(m)
+                None -> break
+
+        out
+
+    /** Every capture under `n`, in the order the nodes occur. */
+    captures(&self, n: Node) -> Buf[Capture]
+        val qc = query_cursor()
+        var out: Buf[Capture] = buf()
+
+        qc.exec(self, n)
+
+        loop
+            qc.next_capture() match
+                Some((m, i)) -> out.push(m.captures[usize(i)])
+                None -> break
+
+        out
+end Query
+
+impl Drop for Query
+    drop(self) = c.query_delete(self.raw)
+
+/** Compiles `source` against `l`. */
+query(l: Language, source: string) -> Result[&Query, QueryError]
+    var offset: u32 = 0
+    var kind: u32 = 0
+    val q = c.query_new(l.raw, bytes_ptr(source), u32(source.len), &offset, &kind)
+
+    if q != null then return Ok(Query(q))
+
+    Err(QueryError(query_error_kind(kind), offset, point_at(source, offset)))
+end query
+
+private query_error_kind(kind: u32) -> QueryErrorKind
+    if kind == c.QUERY_ERROR_SYNTAX then Syntax
+    elif kind == c.QUERY_ERROR_NODE_TYPE then UnknownNodeType
+    elif kind == c.QUERY_ERROR_FIELD then UnknownField
+    elif kind == c.QUERY_ERROR_CAPTURE then UnknownCapture
+    elif kind == c.QUERY_ERROR_STRUCTURE then Structure
+    else LanguageMismatch
+
+/** Runs a query over a node, one match or capture at a time. It holds the query and the tree it
+ * was last run over, so the matches it answers stay valid.
+ */
+struct QueryCursor
+    private raw: *c.QueryCursor
+    private query: Option[&Query]
+    private tree: Option[&Tree]
+
+    /** Starts running `q` over `n`. */
+    exec(*self, q: &Query, n: Node)
+        self.query = Some(q)
+        self.tree = Some(n.tree)
+        c.query_cursor_exec(self.raw, q.raw, n.raw)
+
+    /** Limits the matches to those within bytes `start..<end`. */
+    set_byte_range(*self, start: u32, end: u32) -> bool = c.query_cursor_set_byte_range(self.raw, start, end)
+
+    /** Caps how many in-progress matches the cursor keeps. */
+    set_match_limit(*self, limit: u32) = c.query_cursor_set_match_limit(self.raw, limit)
+
+    /** Whether the limit dropped any match. */
+    did_exceed_match_limit(*self) -> bool = c.query_cursor_did_exceed_match_limit(self.raw)
+
+    /** The next match, once all of its pattern has matched. */
+    next_match(*self) -> Option[Match]
+        var m = c.QueryMatch(0, 0, 0, null)
+
+        if !c.query_cursor_next_match(self.raw, &m) then return None
+
+        Some(self.copy_match(m))
+
+    /** The next capture in text order, with the match it belongs to and its index in that match. */
+    next_capture(*self) -> Option[(Match, u32)]
+        var m = c.QueryMatch(0, 0, 0, null)
+        var i: u32 = 0
+
+        if !c.query_cursor_next_capture(self.raw, &m, &i) then return None
+
+        Some((self.copy_match(m), i))
+
+    // The captures array is the cursor's and is overwritten by the next call, so it is copied out.
+    private copy_match(*self, m: c.QueryMatch) -> Match
+        var caps: Buf[Capture] = buf()
+
+        self.tree match
+            Some(t) ->
+                for i in 0..<m.capture_count
+                    val cap = m.captures[i]
+
+                    caps.push(Capture(Node(cap.node, t), cap.index))
+            None -> ()
+
+        Match(m.id, u32(m.pattern_index), caps)
+end QueryCursor
+
+impl Drop for QueryCursor
+    drop(self) = c.query_cursor_delete(self.raw)
+
+/** A cursor with nothing to run yet. */
+query_cursor() -> &QueryCursor = QueryCursor(c.query_cursor_new(), None, None)
+
+private sized_text(p: *u8, n: u32) -> string = if p == null then "" else from_utf8_lossy(p[0..<usize(n)])
+
+private arg_texts(m: Match, args: Buf[PredicateArg]) -> Buf[string]
+    var out: Buf[string] = buf()
+
+    for a in args.view()
+        a match
+            CaptureArg(id, _) ->
+                for cap in m.captures.view()
+                    if cap.index == id then out.push(cap.node.text())
+            TextArg(t) -> out.push(t)
+
+    out
+
+private all_equal(xs: Buf[string]) -> bool
+    for i in 1..<xs.len()
+        if xs[i] != xs[0] then return false
+
+    true

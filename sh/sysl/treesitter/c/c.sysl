@@ -1,0 +1,241 @@
+// tree-sitter as C reaches it: the records `api.h` hands over by value, and one `extern` per entry
+// point this package uses, transcribed from the header.
+//
+// **Nothing here is meant to be called by a program.** A node is four words of somebody else's
+// bookkeeping, a string is a `const char *` whose owner varies from call to call, and a failure is an
+// out-parameter. The module above turns those into `&Parser`, `&Tree`, `Node` and `&Query` values
+// that free what they own, and is what an application imports.
+//
+// **There is no shim.** tree-sitter's API is records of scalars handed over by value, which sysl
+// passes in C's registers itself, and its three callbacks are reached by `@export`ed trampolines in
+// the module above. Every record below has its `sizeof` checked against the header's in the tests,
+// because a field transcribed wrongly links perfectly and reads the wrong bytes.
+
+module sh.sysl.treesitter.c
+
+@link("tree-sitter")
+
+@include("tree_sitter/api.h")
+
+// ## The records
+//
+// Field for field the C's. `TSNode` and `TSTreeCursor` are opaque in meaning but not in size: the
+// caller holds them, so their layout has to be spelled even though nothing reads the fields.
+
+struct Point
+    row: u32
+    column: u32
+
+struct Range
+    start_point: Point
+    end_point: Point
+    start_byte: u32
+    end_byte: u32
+
+struct InputEdit
+    start_byte: u32
+    old_end_byte: u32
+    new_end_byte: u32
+    start_point: Point
+    old_end_point: Point
+    new_end_point: Point
+
+struct Node
+    context: [4]u32
+    id: *u8
+    tree: *u8
+
+struct TreeCursor
+    tree: *u8
+    id: *u8
+    context: [3]u32
+
+struct QueryCapture
+    node: Node
+    index: u32
+
+struct QueryMatch
+    id: u32
+    pattern_index: u16
+    capture_count: u16
+    captures: *QueryCapture
+
+struct PredicateStep
+    kind: u32
+    value_id: u32
+
+/** `TSInput`: the read callback answers a chunk starting at `byte_index` and its length. */
+struct Input
+    payload: *u8
+    read: *extern(*u8, u32, Point, *u32) -> *u8
+    encoding: u32
+    decode: *u8
+
+/** `TSLogger`. */
+struct Logger
+    payload: *u8
+    log: *extern(*u8, u32, *u8) -> unit
+
+// The opaque handles. Nothing on this side ever sees inside one.
+opaque struct Language
+opaque struct Parser
+opaque struct Tree
+opaque struct Query
+opaque struct QueryCursor
+
+// ## The sizes and the numbers, asked for rather than written down
+
+c const
+    NODE_SIZE:          usize = "sizeof(TSNode)"
+    CURSOR_SIZE:        usize = "sizeof(TSTreeCursor)"
+    RANGE_SIZE:         usize = "sizeof(TSRange)"
+    EDIT_SIZE:          usize = "sizeof(TSInputEdit)"
+    CAPTURE_SIZE:       usize = "sizeof(TSQueryCapture)"
+    MATCH_SIZE:         usize = "sizeof(TSQueryMatch)"
+    INPUT_SIZE:         usize = "sizeof(TSInput)"
+    LOGGER_SIZE:        usize = "sizeof(TSLogger)"
+    STEP_SIZE:          usize = "sizeof(TSQueryPredicateStep)"
+
+    LANGUAGE_VERSION:   u32 = "TREE_SITTER_LANGUAGE_VERSION"
+    MIN_COMPATIBLE_LANGUAGE_VERSION: u32 = "TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION"
+
+    ENCODING_UTF8:      u32 = "TSInputEncodingUTF8"
+
+    LOG_PARSE:          u32 = "TSLogTypeParse"
+    LOG_LEX:            u32 = "TSLogTypeLex"
+
+    STEP_DONE:          u32 = "TSQueryPredicateStepTypeDone"
+    STEP_CAPTURE:       u32 = "TSQueryPredicateStepTypeCapture"
+    STEP_STRING:        u32 = "TSQueryPredicateStepTypeString"
+
+    QUERY_ERROR_NONE:      u32 = "TSQueryErrorNone"
+    QUERY_ERROR_SYNTAX:    u32 = "TSQueryErrorSyntax"
+    QUERY_ERROR_NODE_TYPE: u32 = "TSQueryErrorNodeType"
+    QUERY_ERROR_FIELD:     u32 = "TSQueryErrorField"
+    QUERY_ERROR_CAPTURE:   u32 = "TSQueryErrorCapture"
+    QUERY_ERROR_STRUCTURE: u32 = "TSQueryErrorStructure"
+    QUERY_ERROR_LANGUAGE:  u32 = "TSQueryErrorLanguage"
+
+    QUANTIFIER_ZERO:         u32 = "TSQuantifierZero"
+    QUANTIFIER_ZERO_OR_ONE:  u32 = "TSQuantifierZeroOrOne"
+    QUANTIFIER_ZERO_OR_MORE: u32 = "TSQuantifierZeroOrMore"
+    QUANTIFIER_ONE:          u32 = "TSQuantifierOne"
+    QUANTIFIER_ONE_OR_MORE:  u32 = "TSQuantifierOneOrMore"
+
+    SYMBOL_REGULAR:     u32 = "TSSymbolTypeRegular"
+    SYMBOL_ANONYMOUS:   u32 = "TSSymbolTypeAnonymous"
+    SYMBOL_SUPERTYPE:   u32 = "TSSymbolTypeSupertype"
+    SYMBOL_AUXILIARY:   u32 = "TSSymbolTypeAuxiliary"
+
+// What `ts_node_string` and `ts_tree_get_changed_ranges` hand back is the caller's to free, with the
+// allocator tree-sitter was built with — the system one, since nothing here calls `ts_set_allocator`.
+extern "free" free(p: *u8)
+
+// ## Parser
+
+extern "ts_parser_new" parser_new() -> *Parser
+extern "ts_parser_delete" parser_delete(p: *Parser)
+extern "ts_parser_language" parser_language(p: *Parser) -> *Language
+extern "ts_parser_set_language" parser_set_language(p: *Parser, l: *Language) -> bool
+extern "ts_parser_set_included_ranges" parser_set_included_ranges(p: *Parser, ranges: *Range, count: u32) -> bool
+extern "ts_parser_included_ranges" parser_included_ranges(p: *Parser, count: *u32) -> *Range
+extern "ts_parser_parse" parser_parse(p: *Parser, old: *Tree, input: Input) -> *Tree
+extern "ts_parser_parse_string" parser_parse_string(p: *Parser, old: *Tree, s: *u8, length: u32) -> *Tree
+extern "ts_parser_reset" parser_reset(p: *Parser)
+extern "ts_parser_set_logger" parser_set_logger(p: *Parser, logger: Logger)
+
+// ## Tree
+
+extern "ts_tree_copy" tree_copy(t: *Tree) -> *Tree
+extern "ts_tree_delete" tree_delete(t: *Tree)
+extern "ts_tree_root_node" tree_root_node(t: *Tree) -> Node
+extern "ts_tree_language" tree_language(t: *Tree) -> *Language
+extern "ts_tree_edit" tree_edit(t: *Tree, edit: *InputEdit)
+extern "ts_tree_get_changed_ranges" tree_get_changed_ranges(old: *Tree, new: *Tree, length: *u32) -> *Range
+
+// ## Node
+
+extern "ts_node_type" node_type(n: Node) -> *u8
+extern "ts_node_symbol" node_symbol(n: Node) -> u16
+extern "ts_node_grammar_type" node_grammar_type(n: Node) -> *u8
+extern "ts_node_start_byte" node_start_byte(n: Node) -> u32
+extern "ts_node_start_point" node_start_point(n: Node) -> Point
+extern "ts_node_end_byte" node_end_byte(n: Node) -> u32
+extern "ts_node_end_point" node_end_point(n: Node) -> Point
+extern "ts_node_string" node_string(n: Node) -> *u8
+extern "ts_node_is_null" node_is_null(n: Node) -> bool
+extern "ts_node_is_named" node_is_named(n: Node) -> bool
+extern "ts_node_is_missing" node_is_missing(n: Node) -> bool
+extern "ts_node_is_extra" node_is_extra(n: Node) -> bool
+extern "ts_node_has_changes" node_has_changes(n: Node) -> bool
+extern "ts_node_has_error" node_has_error(n: Node) -> bool
+extern "ts_node_is_error" node_is_error(n: Node) -> bool
+extern "ts_node_parse_state" node_parse_state(n: Node) -> u16
+extern "ts_node_parent" node_parent(n: Node) -> Node
+extern "ts_node_child" node_child(n: Node, i: u32) -> Node
+extern "ts_node_field_name_for_child" node_field_name_for_child(n: Node, i: u32) -> *u8
+extern "ts_node_child_count" node_child_count(n: Node) -> u32
+extern "ts_node_named_child" node_named_child(n: Node, i: u32) -> Node
+extern "ts_node_named_child_count" node_named_child_count(n: Node) -> u32
+extern "ts_node_child_by_field_name" node_child_by_field_name(n: Node, name: *u8, length: u32) -> Node
+extern "ts_node_next_sibling" node_next_sibling(n: Node) -> Node
+extern "ts_node_prev_sibling" node_prev_sibling(n: Node) -> Node
+extern "ts_node_next_named_sibling" node_next_named_sibling(n: Node) -> Node
+extern "ts_node_prev_named_sibling" node_prev_named_sibling(n: Node) -> Node
+extern "ts_node_descendant_count" node_descendant_count(n: Node) -> u32
+extern "ts_node_descendant_for_byte_range" node_descendant_for_byte_range(n: Node, start: u32, end: u32) -> Node
+extern "ts_node_named_descendant_for_byte_range" node_named_descendant_for_byte_range(n: Node, start: u32, end: u32) -> Node
+extern "ts_node_eq" node_eq(a: Node, b: Node) -> bool
+
+// ## Tree cursor
+
+extern "ts_tree_cursor_new" tree_cursor_new(n: Node) -> TreeCursor
+extern "ts_tree_cursor_delete" tree_cursor_delete(c: *TreeCursor)
+extern "ts_tree_cursor_reset" tree_cursor_reset(c: *TreeCursor, n: Node)
+extern "ts_tree_cursor_current_node" tree_cursor_current_node(c: *TreeCursor) -> Node
+extern "ts_tree_cursor_current_field_name" tree_cursor_current_field_name(c: *TreeCursor) -> *u8
+extern "ts_tree_cursor_goto_parent" tree_cursor_goto_parent(c: *TreeCursor) -> bool
+extern "ts_tree_cursor_goto_next_sibling" tree_cursor_goto_next_sibling(c: *TreeCursor) -> bool
+extern "ts_tree_cursor_goto_previous_sibling" tree_cursor_goto_previous_sibling(c: *TreeCursor) -> bool
+extern "ts_tree_cursor_goto_first_child" tree_cursor_goto_first_child(c: *TreeCursor) -> bool
+extern "ts_tree_cursor_goto_last_child" tree_cursor_goto_last_child(c: *TreeCursor) -> bool
+extern "ts_tree_cursor_current_depth" tree_cursor_current_depth(c: *TreeCursor) -> u32
+extern "ts_tree_cursor_goto_first_child_for_byte" tree_cursor_goto_first_child_for_byte(c: *TreeCursor, byte: u32) -> i64
+
+// ## Query
+
+extern "ts_query_new" query_new(l: *Language, source: *u8, length: u32, error_offset: *u32, error_type: *u32) -> *Query
+extern "ts_query_delete" query_delete(q: *Query)
+extern "ts_query_pattern_count" query_pattern_count(q: *Query) -> u32
+extern "ts_query_capture_count" query_capture_count(q: *Query) -> u32
+extern "ts_query_string_count" query_string_count(q: *Query) -> u32
+extern "ts_query_start_byte_for_pattern" query_start_byte_for_pattern(q: *Query, i: u32) -> u32
+extern "ts_query_predicates_for_pattern" query_predicates_for_pattern(q: *Query, i: u32, count: *u32) -> *PredicateStep
+extern "ts_query_capture_name_for_id" query_capture_name_for_id(q: *Query, i: u32, length: *u32) -> *u8
+extern "ts_query_capture_quantifier_for_id" query_capture_quantifier_for_id(q: *Query, pattern: u32, capture: u32) -> u32
+extern "ts_query_string_value_for_id" query_string_value_for_id(q: *Query, i: u32, length: *u32) -> *u8
+extern "ts_query_disable_capture" query_disable_capture(q: *Query, name: *u8, length: u32)
+extern "ts_query_disable_pattern" query_disable_pattern(q: *Query, i: u32)
+
+extern "ts_query_cursor_new" query_cursor_new() -> *QueryCursor
+extern "ts_query_cursor_delete" query_cursor_delete(c: *QueryCursor)
+extern "ts_query_cursor_exec" query_cursor_exec(c: *QueryCursor, q: *Query, n: Node)
+extern "ts_query_cursor_did_exceed_match_limit" query_cursor_did_exceed_match_limit(c: *QueryCursor) -> bool
+extern "ts_query_cursor_set_match_limit" query_cursor_set_match_limit(c: *QueryCursor, limit: u32)
+extern "ts_query_cursor_set_byte_range" query_cursor_set_byte_range(c: *QueryCursor, start: u32, end: u32) -> bool
+extern "ts_query_cursor_next_match" query_cursor_next_match(c: *QueryCursor, m: *QueryMatch) -> bool
+extern "ts_query_cursor_next_capture" query_cursor_next_capture(c: *QueryCursor, m: *QueryMatch, index: *u32) -> bool
+
+// ## Language
+
+extern "ts_language_copy" language_copy(l: *Language) -> *Language
+extern "ts_language_delete" language_delete(l: *Language)
+extern "ts_language_abi_version" language_abi_version(l: *Language) -> u32
+extern "ts_language_name" language_name(l: *Language) -> *u8
+extern "ts_language_symbol_count" language_symbol_count(l: *Language) -> u32
+extern "ts_language_symbol_name" language_symbol_name(l: *Language, s: u16) -> *u8
+extern "ts_language_symbol_type" language_symbol_type(l: *Language, s: u16) -> u32
+extern "ts_language_symbol_for_name" language_symbol_for_name(l: *Language, name: *u8, length: u32, named: bool) -> u16
+extern "ts_language_field_count" language_field_count(l: *Language) -> u32
+extern "ts_language_field_name_for_id" language_field_name_for_id(l: *Language, id: u16) -> *u8
+extern "ts_language_field_id_for_name" language_field_id_for_name(l: *Language, name: *u8, length: u32) -> u16

@@ -1,0 +1,23 @@
+module sh.sysl.treesitter.json
+
+import sh.sysl.treesitter.{Language, language}
+import sh.sysl.treesitter.c
+
+// The JSON grammar, tree-sitter-json v0.24.8 (MIT, `LICENSE` beside this file), whose generated
+// `parser.c` sits here unchanged. It is the grammar this package's tests parse with, and the
+// pattern for bringing any other: a package holding the grammar's `parser.c` (and `scanner.c`, where
+// it has one) with `tree_sitter/parser.h` beside it, one `extern` for `tree_sitter_<name>`, and a
+// function handing it to `language`. The C is archived with the package and linked only into a
+// program that calls the function.
+
+extern "tree_sitter_json" raw_json() -> *c.Language
+
+/** The JSON grammar. */
+json_language() -> Language = language(raw_json())
+
+extern "sysl_treesitter_json_with_abi" raw_json_with_abi(version: u32) -> *c.Language
+
+/** The JSON grammar claiming to have been generated for ABI `version` — the one way to show a
+ * parser refusing a grammar it cannot read, since every real grammar is one it can.
+ */
+json_language_claiming_abi(version: u32) -> Language = language(raw_json_with_abi(version))

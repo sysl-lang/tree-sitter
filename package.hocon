@@ -1,0 +1,34 @@
+// tree-sitter — the incremental parsing library, bound for sysl.
+//
+// This is the block a consumer writes to reach this package:
+//
+//     dependencies {
+//       tree-sitter { git = "github.com/sysl-lang/tree-sitter", version = "0.1.0" }
+//     }
+//
+// **The library has to be installed, and so do its headers**; the JSON grammar the tests use is
+// vendored in `sh/sysl/treesitter/json/`, since a grammar is generated C rather than a library a
+// package manager ships.
+//
+//     brew install tree-sitter               # macOS
+//     sudo apt install libtree-sitter-dev    # Debian / Ubuntu
+//
+// **tree-sitter 0.25 or newer**, where `ts_language_abi_version` and `ts_language_name` arrived.
+
+package {
+  name    = "tree-sitter"
+  version = "0.1.0"
+
+  sysl = "0.1.0-alpha.12"
+}
+
+// `heap`, because every parser, tree, cursor and query is a `&T` whose destructor frees what
+// tree-sitter allocated; `os`, because tree-sitter allocates with the C library's `malloc`.
+requires {
+  heap = true
+  os   = true
+
+  pkg_config {
+    tree-sitter = "tree-sitter — `brew install tree-sitter` on macOS, Debian's libtree-sitter-dev"
+  }
+}

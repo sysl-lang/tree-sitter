@@ -1,0 +1,133 @@
+module sh.sysl.treesitter
+
+import sh.sysl.treesitter.c
+import sysl.buf.{Buf, buf}
+import sysl.slices.as_ptr
+
+/** Which stage of the parser wrote a log line. */
+enum LogKind
+    Parse
+    Lex
+
+/** A parser: one language at a time, any number of texts.
+ *
+ * **The logger is held here** because tree-sitter calls it with the parser's address as its only
+ * context, and the box is what that address points at. It runs on the thread that called `parse`,
+ * during the call, so it is an ordinary `&Fn` rather than a `&sync` one.
+ */
+struct Parser
+    private raw: *c.Parser
+    private logger: Option[&Fn(LogKind, string) -> unit]
+
+    /** Sets the grammar, refusing one generated for an ABI this tree-sitter does not read. */
+    set_language(*self, l: Language) -> Result[unit, Error]
+        if c.parser_set_language(self.raw, l.raw) then return Ok(())
+
+        val (oldest, newest) = abi_versions()
+
+        Err(VersionMismatch(l.abi_version(), oldest, newest))
+
+    /** The grammar set last, if any. */
+    language(*self) -> Option[Language]
+        val l = c.parser_language(self.raw)
+
+        if l == null then None else Some(Language(l))
+
+    /** Parses `text`. Given the tree of an earlier version of the text, already `edit`ed to say what
+     * changed, the parse reuses every subtree the edit did not touch.
+     */
+    parse(*self, text: string, old: Option[&Tree] = None) -> Result[&Tree, Error]
+        val t = c.parser_parse_string(self.raw, raw_tree(old), bytes_ptr(text), u32(text.len))
+
+        if t == null then return Err(NoLanguage)
+
+        Ok(Tree(t, text))
+
+    /** Parses text supplied in chunks by `read`, which is asked for the text starting at a byte
+     * offset (and its position) and answers any non-empty prefix of it, or `""` at the end.
+     *
+     * **The tree carries no text**, since what was read is the callback's to keep: `Node.text` on it
+     * answers `""`, and `Node.text_in` takes the text explicitly.
+     */
+    parse_with(*self, read: &Fn(u32, Point) -> string, old: Option[&Tree] = None) -> Result[&Tree, Error]
+        val r: &Reader = Reader(read, "")
+        val input = c.Input(ptr_cast(&*r), &read_chunk, c.ENCODING_UTF8, null)
+        val t = c.parser_parse(self.raw, raw_tree(old), input)
+
+        if t == null then return Err(NoLanguage)
+
+        Ok(Tree(t, ""))
+
+    /** Installs `f` to hear every line the parser and lexer log. */
+    set_logger(*self, f: &Fn(LogKind, string) -> unit)
+        self.logger = Some(f)
+        c.parser_set_logger(self.raw, c.Logger(ptr_cast(self), &log_line))
+
+    /** Stops logging. */
+    clear_logger(*self)
+        c.parser_set_logger(self.raw, c.Logger(null, null))
+        self.logger = None
+
+    /** Limits parsing to `ranges` of the text — for a language embedded in another. An empty list
+     * means the whole text again.
+     */
+    set_included_ranges(*self, ranges: []const Span) -> Result[unit, Error]
+        var cs: Buf[c.Range] = buf()
+
+        for r in ranges
+            cs.push(c_range(r))
+
+        if c.parser_set_included_ranges(self.raw, as_ptr(cs.view()), u32(cs.len())) then Ok(())
+        else Err(BadRanges)
+
+    /** The ranges set last; the whole text is one range covering everything. */
+    included_ranges(*self) -> Buf[Span]
+        var n: u32 = 0
+        val p = c.parser_included_ranges(self.raw, &n)
+        var out: Buf[Span] = buf()
+
+        for i in 0..<n
+            out.push(range_of(p[i]))
+
+        out
+
+    /** Forgets a parse that was interrupted, so the next one starts fresh. */
+    reset(*self) = c.parser_reset(self.raw)
+end Parser
+
+impl Drop for Parser
+    drop(self) = c.parser_delete(self.raw)
+
+/** A parser with no language yet. */
+parser() -> &Parser = Parser(c.parser_new(), None)
+
+private raw_tree(t: Option[&Tree]) -> *c.Tree = t match
+    Some(tree) -> tree.raw
+    None -> null
+
+// ## The two callbacks
+
+/** What a read callback's chunk is kept alive by: tree-sitter reads it after the callback returns,
+ * until it asks for the next one.
+ */
+private struct Reader
+    f: &Fn(u32, Point) -> string
+    last: string
+
+// `TSInput.read` takes its position as a `TSPoint` by value, and only an exported function has an
+// address C can call with an aggregate argument.
+@export("sysl_treesitter_read_chunk")
+private read_chunk(payload: *u8, at: u32, where: c.Point, n: *u32) -> *u8
+    val r: *Reader = ptr_cast(payload)
+    val f = r.f
+
+    r.last = f(at, point_of(where))
+    *n = u32(r.last.len)
+    bytes_ptr(r.last)
+
+private log_line(payload: *u8, kind: u32, line: *u8)
+    val p: *Parser = ptr_cast(payload)
+
+    p.logger match
+        Some(f) -> f(if kind == c.LOG_LEX then Lex else Parse, text_of(line))
+        None -> ()
