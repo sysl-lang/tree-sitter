@@ -2,6 +2,8 @@
 
 [tree-sitter](https://tree-sitter.github.io/) for [sysl](https://github.com/sysl-lang/sysl): the incremental parsing library behind most editors' syntax trees. You give it a grammar and some text, and it gives back a concrete syntax tree. After an edit it re-parses only what changed, and it can answer structural queries over the tree. Module `sh.sysl.treesitter`.
 
+*An independent sysl package for tree-sitter. It is not affiliated with or endorsed by tree-sitter's authors or trademark holders.*
+
 It is meant as the base for [sysl-lang/highlighter](https://github.com/sysl-lang/highlighter) and for a future `sysl lsp`.
 
 ```hocon
