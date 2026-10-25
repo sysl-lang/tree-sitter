@@ -2,6 +2,7 @@ module sh.sysl.treesitter
 
 import sh.sysl.treesitter.c
 import sysl.buf.{Buf, buf}
+import sysl.raw.ptr_cast
 import sysl.text.from_utf8_lossy
 
 /** A syntax tree, and the text it was parsed from.

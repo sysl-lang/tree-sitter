@@ -19,7 +19,7 @@ package {
   name    = "tree-sitter"
   version = "0.1.0"
 
-  sysl = "0.1.0-alpha.12"
+  sysl = "0.6.0"
 }
 
 // `heap`, because every parser, tree, cursor and query is a `&T` whose destructor frees what
