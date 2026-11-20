@@ -3,8 +3,8 @@ module sh.sysl.treesitter.json
 import sh.sysl.treesitter.{Language, language}
 import sh.sysl.treesitter.c
 
-// The JSON grammar, tree-sitter-json v0.24.8 (MIT, `LICENSE` beside this file), whose generated
-// `parser.c` sits here unchanged. It is the grammar this package's tests parse with, and the
+// The JSON grammar, tree-sitter-json v0.24.8 (MIT, `LICENSE` beside this file), whose `parser.c` and
+// `tree_sitter/parser.h` were regenerated here by tree-sitter CLI 0.27.1 (ABI 15). It is the grammar this package's tests parse with, and the
 // pattern for bringing any other: a package holding the grammar's `parser.c` (and `scanner.c`, where
 // it has one) with `tree_sitter/parser.h` beside it, one `extern` for `tree_sitter_<name>`, and a
 // function handing it to `language`. The C is archived with the package and linked only into a

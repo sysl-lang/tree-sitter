@@ -3,7 +3,7 @@
 // This is the block a consumer writes to reach this package:
 //
 //     dependencies {
-//       tree-sitter { git = "github.com/sysl-lang/tree-sitter", version = "0.1.0" }
+//       tree-sitter { git = "github.com/sysl-lang/tree-sitter", version = "0.2.0" }
 //     }
 //
 // **The library has to be installed, and so do its headers**; the JSON grammar the tests use is
@@ -13,13 +13,13 @@
 //     brew install tree-sitter               # macOS
 //     sudo apt install libtree-sitter-dev    # Debian / Ubuntu
 //
-// **tree-sitter 0.25 or newer**, where `ts_language_abi_version` and `ts_language_name` arrived.
+// **tree-sitter 0.27 or newer**: the progress callbacks, `ts_node_edit`, the containing-range calls and the ABI 15 grammar this package vendors need it.
 
 package {
   name    = "tree-sitter"
-  version = "0.1.0"
+  version = "0.2.0"
 
-  sysl = "0.6.0"
+  sysl = "0.11.14"
 }
 
 // `heap`, because every parser, tree, cursor and query is a `&T` whose destructor frees what

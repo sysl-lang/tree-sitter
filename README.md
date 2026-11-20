@@ -8,11 +8,11 @@ It is meant as the base for [sysl-lang/highlighter](https://github.com/sysl-lang
 
 ```hocon
 dependencies {
-  tree-sitter { git = "github.com/sysl-lang/tree-sitter", version = "0.1.0" }
+  tree-sitter { git = "github.com/sysl-lang/tree-sitter", version = "0.2.0" }
 }
 ```
 
-The library and its headers have to be installed (`brew install tree-sitter`, or Debian's `libtree-sitter-dev`; 0.25 or newer). `pkg-config tree-sitter` is how the build finds them. Requires sysl `0.1.0-alpha.12`.
+The library and its headers have to be installed (`brew install tree-sitter`, or Debian's `libtree-sitter-dev`; 0.27 or newer, which is the ABI 15 library this was built and tested against). `pkg-config tree-sitter` is how the build finds them. Requires sysl `0.11.14`.
 
 ## Example
 
@@ -65,20 +65,20 @@ extern "tree_sitter_toml" raw_toml() -> *c.Language
 toml_language() -> Language = language(raw_toml())
 ```
 
-`sh.sysl.treesitter.json` is a worked example of this. It vendors **tree-sitter-json v0.24.8** (MIT, `sh/sysl/treesitter/json/LICENSE`): `src/parser.c` and `src/tree_sitter/parser.h` unchanged, taken from `https://github.com/tree-sitter/tree-sitter-json/archive/refs/tags/v0.24.8.tar.gz`, SHA-256 `acf6e8362457e819ed8b613f2ad9a0e1b621a77556c296f3abea58f7880a9213`. That grammar has no scanner and is generated for ABI 14. Its C is linked into a program only if the program calls `json_language()`.
+`sh.sysl.treesitter.json` is a worked example of this. It vendors **tree-sitter-json v0.24.8** (MIT, `sh/sysl/treesitter/json/LICENSE`): `src/parser.c` and `src/tree_sitter/parser.h` regenerated as above from `https://github.com/tree-sitter/tree-sitter-json/archive/refs/tags/v0.24.8.tar.gz`, SHA-256 `acf6e8362457e819ed8b613f2ad9a0e1b621a77556c296f3abea58f7880a9213`. That grammar has no scanner. Its `parser.c` and `parser.h` were regenerated with tree-sitter CLI 0.27.1 (`tree-sitter generate` in the tarball's checkout), which makes them ABI 15; `parser.c` differs from the tarball's generated file in that and in nothing else the grammar.js controls. Its C is linked into a program only if the program calls `json_language()`.
 
 ## What is bound
 
 | tree-sitter | here |
 |---|---|
-| `TSParser` | `parser() -> &Parser`: `set_language` (fails with `VersionMismatch(found, oldest, newest)` if the grammar's ABI is not one this tree-sitter reads), `parse(text, old)`, `parse_with(read, old)`, `set_logger` / `clear_logger`, `set_included_ranges` / `included_ranges`, `reset` |
-| `TSTree` | `&Tree`: `root`, `edit`, `changed_ranges`, `copy`, `language`, `text` |
-| `TSNode` | `Node`: `kind`, `grammar_kind`, `symbol`; `is_named` / `is_missing` / `is_extra` / `is_error` / `has_error` / `has_changes`; bytes, points and `span`; `text` and `text_in`; `sexp` (`ts_node_string`); `parent`; children and named children by index or as a `Buf`; `child_by_field`; `field_name_for_child`; siblings; `descendant_count`; descendants for a byte range; `walk`; `==` |
-| `TSTreeCursor` | `&Cursor`: `node`, `field_name`, `depth`, the six `goto_*` moves, `reset` |
-| `TSQuery` | `query(lang, source) -> Result[&Query, QueryError]`: counts, capture names and indices, string values, quantifiers, `predicates` (as data), `text_predicates_hold` (`#eq?`, `#not-eq?`, `#any-of?`, `#not-any-of?`), `disable_capture`, `disable_pattern`, `matches`, `captures` |
-| `TSQueryCursor` | `query_cursor() -> &QueryCursor`: `exec`, `next_match`, `next_capture`, `set_byte_range`, `set_match_limit`, `did_exceed_match_limit` |
-| `TSLanguage` | `Language`: `abi_version`, `name`, symbols (count, name, kind, lookup), fields (count, name, lookup) |
-| `TSInputEdit` | `Edit`, and `replacement(old, start, end, inserted)`, which works out the three points |
+| `TSParser` | `parser() -> &Parser`: `set_language` (fails with `VersionMismatch(found, oldest, newest)` if the grammar's ABI is not one this tree-sitter reads), `parse(text, old)`, `parse_with(read, old)`, `parse_with_progress(text, check, old)` (a progress callback that can cancel: `Cancelled`), `parse_encoded(bytes, Utf8 / Utf16Le / Utf16Be, old)`, `parse_decoded(read, decode, old)` (a custom decoder), `set_logger` / `clear_logger` / `has_logger`, `set_included_ranges` / `included_ranges`, `print_dot_graphs`, `reset` |
+| `TSTree` | `&Tree`: `root`, `root_with_offset`, `edit`, `changed_ranges`, `included_ranges`, `copy`, `language`, `text`, `print_dot_graph` |
+| `TSNode` | `Node`: `kind`, `grammar_kind`, `symbol`; `is_named` / `is_missing` / `is_extra` / `is_error` / `has_error` / `has_changes`; bytes, points and `span`; `text` and `text_in`; `sexp` (`ts_node_string`); `parent`; children and named children by index or as a `Buf`; `child_by_field`; `field_name_for_child`; siblings; `descendant_count`; descendants for a byte range or a point range; `first_child_for_byte` / `first_named_child_for_byte`; `child_by_field_id`; `field_name_for_named_child`; `child_with_descendant`; `parse_state` / `next_parse_state` / `grammar_symbol` / `language`; `edited` (`ts_node_edit`); `walk`; `==` |
+| `TSTreeCursor` | `&Cursor`: `node`, `field_name`, `depth`, the six `goto_*` moves, `goto_first_child_for_point`, `field_id`, `descendant_index` / `goto_descendant`, `copy`, `reset_to`, `reset` |
+| `TSQuery` | `query(lang, source) -> Result[&Query, QueryError]`: counts, capture names and indices, string values, quantifiers, `predicates` (as data), `text_predicates_hold` (`#eq?`, `#not-eq?`, `#any-of?`, `#not-any-of?`), `disable_capture`, `disable_pattern`, `end_byte_for_pattern`, `is_pattern_rooted` / `is_pattern_non_local` / `is_pattern_guaranteed_at_step`, `copy`, `matches`, `captures` |
+| `TSQueryCursor` | `query_cursor() -> &QueryCursor`: `exec`, `next_match`, `next_capture`, `exec_with_progress` (can cancel), `set_byte_range` / `set_point_range`, `set_containing_byte_range` / `set_containing_point_range`, `set_match_limit` / `match_limit` / `did_exceed_match_limit`, `remove_match`, `set_max_start_depth` |
+| `TSLanguage` | `Language`: `abi_version`, `name`, symbols (count, name, kind, lookup), fields (count, name, lookup), `is_parseable`, `is_wasm`, `state_count`, `metadata` (`LanguageVersion`), `supertypes` / `subtypes`, `next_state`, `lookahead` (a `&LookaheadIterator`: `next`, `symbol`, `symbol_name`, `language`, `reset_state`, `reset`, `symbols`) |
+| `TSInputEdit` | `Edit`, and `replacement(old, start, end, inserted)`, which works out the three points; `edit_point` (`ts_point_edit`) and `edit_span` (`ts_range_edit`) |
 
 The raw `extern` layer is `sh.sysl.treesitter.c`. It has no C shim. Every record that crosses by value is laid out as in the header, and a test checks each one's `sizeof` against the header's.
 
@@ -98,17 +98,16 @@ The C API (`api.h`, 0.27.1) exports 147 functions. They fall into three groups:
 
 What is not bound, and why:
 
-- **Wasm grammars** (`ts_wasm_store_*`, `ts_parser_set_wasm_store`, `ts_language_is_wasm`). brew's library is built without wasmtime, so these would only ever fail.
+- **The wasm store** (`ts_wasm_store_new`, `_delete`, `_load_language`, `_language_count`, `ts_parser_set_wasm_store`, `ts_parser_take_wasm_store`). brew's library is built without a wasm engine: `nm -gU` shows `ts_wasm_store_new`, `_load_language` and `_language_count` are not exported at all, and the rest could only ever fail. `Language.is_wasm` is bound and answers false.
 - **`ts_set_allocator`.** It is process-global, and swapping the allocator under live trees is unsafe. This binding frees what tree-sitter returns with the system `free`.
-- **Graphviz dumps** (`ts_parser_print_dot_graphs`, `ts_tree_print_dot_graph`). They write to a file descriptor and are debugging aids. The logger covers the same ground as data.
-- **Progress callbacks** (`ts_parser_parse_with_options`, `ts_query_cursor_exec_with_options`). They are expressible in the same way as the read callback but are not needed by any consumer yet.
-- **The lookahead iterator** (`ts_lookahead_iterator_*`).
-- **Point-based variants of byte-based calls** (`*_for_point_range`, `set_point_range`, `goto_first_child_for_point`, `ts_node_edit`, `ts_point_edit`, `ts_range_edit`).
-- **The remaining parse-state and descendant-index calls** (`next_parse_state`, `child_with_descendant`, `goto_descendant`, `ts_tree_root_node_with_offset`, `parse_string_encoding`, `remove_match`, `set_max_start_depth`, `is_pattern_rooted` / `non_local` / `guaranteed_at_step`, `ts_language_metadata`, `supertypes` / `subtypes`, `next_state`). Each is a one-line `extern` plus a method and would be added on request.
+
+Every other function in `api.h` is bound (`comm` of the header's names against the `extern`s leaves exactly the seven above).
+
+**The progress callbacks** (`parse_with_progress`, `exec_with_progress`) go through plain-address trampolines whose payload is the parser's or the query cursor's box, as the logger does. The options record is kept in the box, because the library may keep the address it is given. **`print_dot_graph` takes an open file descriptor**; a negative one crashes inside tree-sitter for a tree, so pass a real one (the parser's `print_dot_graphs(-1)` switches it off).
 
 ## Tests
 
-`sysl test .` runs 22 tests. The oracle is the `tree-sitter` CLI 0.27.1, run with the same grammar in its own checkout. The CLI output is quoted in the tests next to the command that produced it. The tests check that:
+`sysl test .` runs 39 tests. For the first 22, the oracle is the `tree-sitter` CLI 0.27.1, run with the same grammar in its own checkout. The CLI output is quoted in the tests next to the command that produced it. The tests check that:
 
 - the S-expression matches `tree-sitter parse --no-ranges`, for a valid document, an `ERROR` case and an edited text;
 - the `MISSING` node and the `ERROR` node sit where `tree-sitter parse --cst` and its summary line put them;
@@ -119,6 +118,8 @@ What is not bound, and why:
 - after `edit` and re-parse, the tree equals a fresh parse and the CLI's tree, and a changed range covers the edit.
 
 They also cover the read callback (three-byte chunks, with each request's position checked), the logger (the first line is the CLI's first `--debug` line, `new_parse`), an ABI mismatch provoked with a copy of the grammar that claims ABI 99 or 12, parsing with no language, included ranges in and out of order, and that every record's layout agrees with the C header.
+
+The 17 tests added for the 0.27 surface are checked against `api.h`'s documented behaviour and against values worked out from the JSON document, not against the CLI, which has no command for them. Where the library and the header could disagree the test says what was observed: a containing range is distinguished from an overlapping one by a query whose two matches differ between them, and the cancel tests need a parse of 80 000 bytes before the callback is ever asked. The suite also passes under `SYSL_EXTRA_CFLAGS="-fsanitize=address -g" sysl test .` (the report opens with `instrumented: address (1 binary)`).
 
 ## License
 

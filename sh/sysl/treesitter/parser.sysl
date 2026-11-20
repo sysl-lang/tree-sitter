@@ -10,6 +10,17 @@ enum LogKind
     Parse
     Lex
 
+/** How the text handed to `Parser.parse_encoded` is encoded. */
+enum Encoding
+    Utf8
+    Utf16Le
+    Utf16Be
+
+/** What a parse progress callback is told. */
+struct ParseProgress
+    byte_offset: u32
+    has_error: bool
+
 /** A parser: one language at a time, any number of texts.
  *
  * **The logger is held here** because tree-sitter calls it with the parser's address as its only
@@ -19,6 +30,7 @@ enum LogKind
 struct Parser
     private raw: *c.Parser
     private logger: Option[&Fn(LogKind, string) -> unit]
+    private progress: Option[&Fn(ParseProgress) -> bool]
 
     /** Sets the grammar, refusing one generated for an ABI this tree-sitter does not read. */
     set_language(*self, l: Language) -> Result[unit, Error]
@@ -58,6 +70,61 @@ struct Parser
         if t == null then return Err(NoLanguage)
 
         Ok(Tree(t, ""))
+
+    /** Parses `text`, asking `check` now and then how far the parse has got. When `check` answers
+     * true the parse stops and this answers `Cancelled`.
+     */
+    parse_with_progress(*self, text: string, check: &Fn(ParseProgress) -> bool,
+                        old: Option[&Tree] = None) -> Result[&Tree, Error]
+        if self.language().is_none() then return Err(NoLanguage)
+
+        val r: &Reader = Reader((at, _) -> if at >= u32(text.len) then "" else text[usize(at)..<text.len], "")
+        val input = c.Input(ptr_cast(&*r), &read_chunk, c.ENCODING_UTF8, null)
+
+        self.progress = Some(check)
+
+        val t = c.parser_parse_with_options(self.raw, raw_tree(old), input,
+                                            c.ParseOptions(ptr_cast(self), &progress_step))
+
+        self.progress = None
+        if t == null then return Err(Cancelled)
+
+        Ok(Tree(t, text))
+
+    /** Parses text that is not UTF-8: `bytes` in `encoding`, which gives every offset in bytes of
+     * that encoding. The tree carries no text, since `Node.text` reads UTF-8.
+     */
+    parse_encoded(*self, bytes: []const u8, encoding: Encoding,
+                  old: Option[&Tree] = None) -> Result[&Tree, Error]
+        val e = encoding match
+            Utf8 -> c.ENCODING_UTF8
+            Utf16Le -> c.ENCODING_UTF16LE
+            Utf16Be -> c.ENCODING_UTF16BE
+        val t = c.parser_parse_string_encoding(self.raw, raw_tree(old), as_ptr(bytes), u32(bytes.len), e)
+
+        if t == null then return Err(NoLanguage)
+
+        Ok(Tree(t, ""))
+
+    /** Parses text in an encoding of the caller's own: `read` supplies bytes as for `parse_with`,
+     * and `decode` turns the front of them into one code point, answering how many bytes it used
+     * (and `0` for none left). The tree carries no text.
+     */
+    parse_decoded(*self, read: &Fn(u32, Point) -> string, decode: *extern(*u8, u32, *i32) -> u32,
+                  old: Option[&Tree] = None) -> Result[&Tree, Error]
+        val r: &Reader = Reader(read, "")
+        val input = c.Input(ptr_cast(&*r), &read_chunk, c.ENCODING_CUSTOM, ptr_cast(decode))
+        val t = c.parser_parse(self.raw, raw_tree(old), input)
+
+        if t == null then return Err(NoLanguage)
+
+        Ok(Tree(t, ""))
+
+    /** Writes a Graphviz graph of each parse to file descriptor `fd`; a negative one stops it. */
+    print_dot_graphs(*self, fd: i32) = c.parser_print_dot_graphs(self.raw, fd)
+
+    /** Whether a logger is installed. */
+    has_logger(*self) -> bool = c.parser_logger(self.raw).log != null
 
     /** Installs `f` to hear every line the parser and lexer log. */
     set_logger(*self, f: &Fn(LogKind, string) -> unit)
@@ -100,7 +167,7 @@ impl Drop for Parser
     drop(self) = c.parser_delete(self.raw)
 
 /** A parser with no language yet. */
-parser() -> &Parser = Parser(c.parser_new(), None)
+parser() -> &Parser = Parser(c.parser_new(), None, None)
 
 private raw_tree(t: Option[&Tree]) -> *c.Tree = t match
     Some(tree) -> tree.raw
@@ -125,6 +192,13 @@ private read_chunk(payload: *u8, at: u32, where: c.Point, n: *u32) -> *u8
     r.last = f(at, point_of(where))
     *n = u32(r.last.len)
     bytes_ptr(r.last)
+
+private progress_step(state: *c.ParseState) -> bool
+    val p: *Parser = ptr_cast(state.payload)
+
+    p.progress match
+        Some(f) -> f(ParseProgress(state.current_byte_offset, state.has_error))
+        None -> false
 
 private log_line(payload: *u8, kind: u32, line: *u8)
     val p: *Parser = ptr_cast(payload)

@@ -2,6 +2,7 @@ module sh.sysl.treesitter
 
 import sh.sysl.treesitter.c
 import sysl.buf.{Buf, buf}
+import sysl.raw.ptr_cast
 import sysl.text.from_utf8_lossy
 
 // ## A query
@@ -95,6 +96,26 @@ struct Query
 
     /** Where pattern `i` starts in the query's source. */
     start_byte_for_pattern(*self, i: u32) -> u32 = c.query_start_byte_for_pattern(self.raw, i)
+
+    /** Where pattern `i` ends in the query's source. */
+    end_byte_for_pattern(*self, i: u32) -> u32 = c.query_end_byte_for_pattern(self.raw, i)
+
+    /** Whether every match of pattern `i` has one node as its root. */
+    is_pattern_rooted(*self, i: u32) -> bool = c.query_is_pattern_rooted(self.raw, i)
+
+    /** Whether pattern `i` can match across several top-level nodes, so that running over a
+     * subtree may miss matches.
+     */
+    is_pattern_non_local(*self, i: u32) -> bool = c.query_is_pattern_non_local(self.raw, i)
+
+    /** Whether the pattern step starting at byte `offset` of the source holds in every match
+     * that reaches it.
+     */
+    is_pattern_guaranteed_at_step(*self, offset: u32) -> bool =
+        c.query_is_pattern_guaranteed_at_step(self.raw, offset)
+
+    /** An independent copy of the query. */
+    copy(*self) -> &Query = Query(c.query_copy(self.raw))
 
     quantifier(*self, pattern: u32, capture: u32) -> Quantifier
         val q = c.query_capture_quantifier_for_id(self.raw, pattern, capture)
@@ -223,12 +244,49 @@ struct QueryCursor
     private raw: *c.QueryCursor
     private query: Option[&Query]
     private tree: Option[&Tree]
+    private progress: Option[&Fn(u32) -> bool]
+    private options: c.QueryCursorOptions
 
     /** Starts running `q` over `n`. */
     exec(*self, q: &Query, n: Node)
         self.query = Some(q)
         self.tree = Some(n.tree)
         c.query_cursor_exec(self.raw, q.raw, n.raw)
+
+    /** Starts running `q` over `n`, asking `check` now and then how far the cursor has got. When it
+     * answers true the run stops: matches already finished can still be read, then there are none.
+     */
+    exec_with_progress(*self, q: &Query, n: Node, check: &Fn(u32) -> bool)
+        self.query = Some(q)
+        self.tree = Some(n.tree)
+        self.progress = Some(check)
+
+        // The options live in the cursor: the library may keep the address it is given.
+        self.options = c.QueryCursorOptions(ptr_cast(self), &query_progress_step)
+        c.query_cursor_exec_with_options(self.raw, q.raw, n.raw, &self.options)
+
+    /** Limits the matches to those within positions `start` to `end`. */
+    set_point_range(*self, start: Point, end: Point) -> bool =
+        c.query_cursor_set_point_range(self.raw, c_point(start), c_point(end))
+
+    /** Limits the matches to those entirely inside bytes `start..<end`, rather than those that
+     * merely overlap them.
+     */
+    set_containing_byte_range(*self, start: u32, end: u32) -> bool =
+        c.query_cursor_set_containing_byte_range(self.raw, start, end)
+
+    /** Limits the matches to those entirely inside positions `start` to `end`. */
+    set_containing_point_range(*self, start: Point, end: Point) -> bool =
+        c.query_cursor_set_containing_point_range(self.raw, c_point(start), c_point(end))
+
+    /** The match limit set, or the library's default of none. */
+    match_limit(*self) -> u32 = c.query_cursor_match_limit(self.raw)
+
+    /** Forgets match `id`, which was handed out by `next_match` or `next_capture`. */
+    remove_match(*self, id: u32) = c.query_cursor_remove_match(self.raw, id)
+
+    /** Matches only patterns starting at most `depth` levels below the start node. */
+    set_max_start_depth(*self, depth: u32) = c.query_cursor_set_max_start_depth(self.raw, depth)
 
     /** Limits the matches to those within bytes `start..<end`. */
     set_byte_range(*self, start: u32, end: u32) -> bool = c.query_cursor_set_byte_range(self.raw, start, end)
@@ -275,7 +333,14 @@ impl Drop for QueryCursor
     drop(self) = c.query_cursor_delete(self.raw)
 
 /** A cursor with nothing to run yet. */
-query_cursor() -> &QueryCursor = QueryCursor(c.query_cursor_new(), None, None)
+query_cursor() -> &QueryCursor = QueryCursor(c.query_cursor_new(), None, None, None, c.QueryCursorOptions(null, null))
+
+private query_progress_step(state: *c.QueryCursorState) -> bool
+    val qc: *QueryCursor = ptr_cast(state.payload)
+
+    qc.progress match
+        Some(f) -> f(state.current_byte_offset)
+        None -> false
 
 private sized_text(p: *u8, n: u32) -> string = if p == null then "" else from_utf8_lossy(p[0..<usize(n)])
 

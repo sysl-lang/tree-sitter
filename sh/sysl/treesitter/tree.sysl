@@ -17,6 +17,27 @@ struct Tree
     /** The outermost node. */
     root(&self) -> Node = Node(c.tree_root_node(self.raw), self)
 
+    /** The outermost node with every position shifted forward by `bytes` and `extent`, for a tree
+     * parsed from a piece of a larger text.
+     */
+    root_with_offset(&self, bytes: u32, extent: Point) -> Node =
+        Node(c.tree_root_node_with_offset(self.raw, bytes, c_point(extent)), self)
+
+    /** The ranges the tree was parsed over (see `Parser.set_included_ranges`). */
+    included_ranges(*self) -> Buf[Span]
+        var n: u32 = 0
+        val p = c.tree_included_ranges(self.raw, &n)
+        var out: Buf[Span] = buf()
+
+        for i in 0..<n
+            out.push(range_of(p[i]))
+
+        c.free(ptr_cast(p))
+        out
+
+    /** Writes the tree as a Graphviz graph to file descriptor `fd`. */
+    print_dot_graph(*self, fd: i32) = c.tree_print_dot_graph(self.raw, fd)
+
     /** The text the tree was parsed from. */
     text(*self) -> string = self.source
 
@@ -174,6 +195,54 @@ struct Node
     named_descendant_for_bytes(self, start: u32, end: u32) -> Option[Node] =
         self.wrap(c.node_named_descendant_for_byte_range(self.raw, start, end))
 
+    /** The state the parser was in when it finished this node. */
+    parse_state(self) -> u16 = c.node_parse_state(self.raw)
+
+    /** The state the parser would be in after this node, which a lookahead iterator can ask about. */
+    next_parse_state(self) -> u16 = c.node_next_parse_state(self.raw)
+
+    /** The symbol the grammar gave this node before aliasing. */
+    grammar_symbol(self) -> u16 = c.node_grammar_symbol(self.raw)
+
+    /** The grammar this node's tree was parsed with. */
+    language(self) -> Language = Language(c.node_language(self.raw))
+
+    /** The field the `i`th named child sits under, if any. */
+    field_name_for_named_child(self, i: u32) -> Option[string] =
+        text_or_none(c.node_field_name_for_named_child(self.raw, i))
+
+    /** The child under the field with id `id` (see `Language.field_id`). */
+    child_by_field_id(self, id: u16) -> Option[Node] = self.wrap(c.node_child_by_field_id(self.raw, id))
+
+    /** The child that is, or contains, `d`. */
+    child_with_descendant(self, d: Node) -> Option[Node] =
+        self.wrap(c.node_child_with_descendant(self.raw, d.raw))
+
+    /** The first child that extends past byte `b`. */
+    first_child_for_byte(self, b: u32) -> Option[Node] = self.wrap(c.node_first_child_for_byte(self.raw, b))
+
+    /** The first named child that extends past byte `b`. */
+    first_named_child_for_byte(self, b: u32) -> Option[Node] =
+        self.wrap(c.node_first_named_child_for_byte(self.raw, b))
+
+    /** The smallest node covering positions `start` to `end`. */
+    descendant_for_points(self, start: Point, end: Point) -> Option[Node] =
+        self.wrap(c.node_descendant_for_point_range(self.raw, c_point(start), c_point(end)))
+
+    /** The smallest named node covering positions `start` to `end`. */
+    named_descendant_for_points(self, start: Point, end: Point) -> Option[Node] =
+        self.wrap(c.node_named_descendant_for_point_range(self.raw, c_point(start), c_point(end)))
+
+    /** This node moved to where `e` puts it, as `Tree.edit` does for the whole tree. Only needed for a
+     * node held across an edit; the tree's own nodes are updated by `Tree.edit`.
+     */
+    edited(self, e: Edit) -> Node
+        var n = self.raw
+        var ce = c_edit(e)
+
+        c.node_edit(&n, &ce)
+        Node(n, self.tree)
+
     /** A cursor starting at this node, the cheap way to walk a large subtree. */
     walk(self) -> &Cursor = Cursor(c.tree_cursor_new(self.raw), self.tree)
 
@@ -212,6 +281,30 @@ struct Cursor
         val i = c.tree_cursor_goto_first_child_for_byte(&self.raw, b)
 
         if i < 0 then None else Some(u32(i))
+
+    /** Moves to the first child extending past `p`, answering its index. */
+    goto_first_child_for_point(*self, p: Point) -> Option[u32]
+        val i = c.tree_cursor_goto_first_child_for_point(&self.raw, c_point(p))
+
+        if i < 0 then None else Some(u32(i))
+
+    /** The id of the field the current node sits under, if any. */
+    field_id(*self) -> Option[u16]
+        val f = c.tree_cursor_current_field_id(&self.raw)
+
+        if f == 0 then None else Some(f)
+
+    /** The current node's index among all the descendants of the cursor's starting node. */
+    descendant_index(*self) -> u32 = c.tree_cursor_current_descendant_index(&self.raw)
+
+    /** Moves to the descendant of the starting node with index `i`. */
+    goto_descendant(*self, i: u32) = c.tree_cursor_goto_descendant(&self.raw, i)
+
+    /** An independent cursor at the same place, which keeps its parents. */
+    copy(*self) -> &Cursor = Cursor(c.tree_cursor_copy(&self.raw), self.tree)
+
+    /** Moves to where `other` is, keeping parent information that `reset` would lose. */
+    reset_to(*self, other: &Cursor) = c.tree_cursor_reset_to(&self.raw, &other.raw)
 
     /** Starts again at `n`, which must be of the same tree. */
     reset(*self, n: Node) = c.tree_cursor_reset(&self.raw, n.raw)

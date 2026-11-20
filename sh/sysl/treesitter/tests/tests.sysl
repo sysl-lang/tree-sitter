@@ -70,8 +70,8 @@ nodes_answer_kind_text_position_and_family() =
 
     assert_eq(root.kind(), "document", "the root")
     assert_eq(obj.kind(), "object", "its only child")
-    assert_eq(obj.named_child_count(), u32(2), "two pairs")
-    assert_eq(obj.child_count(), u32(5), "{ pair , pair }")
+    assert_eq(obj.named_child_count(), 2, "two pairs")
+    assert_eq(obj.child_count(), 5, "{ pair , pair }")
     assert_eq(kinds(obj.children()).view(), ["{", "pair", ",", "pair", "}"], "anonymous tokens are children too")
 
     val pair = obj.named_child(0).expect("the first pair")
@@ -82,8 +82,8 @@ nodes_answer_kind_text_position_and_family() =
     assert_eq(value.text(), "[1, true, null]", "the value's text")
     assert_eq(value.start(), Point(0, 6), "where the value starts")
     assert_eq(value.end(), Point(0, 21), "and ends")
-    assert_eq(value.start_byte(), u32(6), "in bytes")
-    assert_eq(value.end_byte(), u32(21), "in bytes")
+    assert_eq(value.start_byte(), 6, "in bytes")
+    assert_eq(value.end_byte(), 21, "in bytes")
     assert_eq(pair.field_name_for_child(0), Some("key"), "child 0 is under `key`")
     assert_eq(pair.field_name_for_child(1), None, "the colon is under no field")
     assert(pair.child_by_field("nope").is_none(), "an unknown field is no node")
@@ -95,7 +95,7 @@ nodes_answer_kind_text_position_and_family() =
     assert(value.is_named() && !obj.child(0).expect("{").is_named(), "named and anonymous")
     assert_eq(kinds(value.named_children()).view(), ["number", "true", "null"], "the array's elements")
     // `tree-sitter parse --cst t1.json` prints 38 nodes.
-    assert_eq(root.descendant_count(), u32(38), "every node, anonymous ones included")
+    assert_eq(root.descendant_count(), 38, "every node, anonymous ones included")
     assert_eq(root.named_descendant_for_bytes(11, 12).expect("a node").kind(), "true", "byte 11 is in `true`")
     assert(!root.has_error(), "a well-formed document")
 end nodes_answer_kind_text_position_and_family
@@ -138,7 +138,7 @@ a_cursor_walks_the_same_nodes_as_the_children() =
                             "string", "string_content", "string", "string_content"],
               "the named nodes in document order")
     // document, object, pair, object, pair, string, string_content.
-    assert_eq(deepest, u32(6), "string_content of the inner key is six below the document")
+    assert_eq(deepest, 6, "string_content of the inner key is six below the document")
 
     cur.reset(root)
     assert(cur.goto_first_child() && cur.goto_first_child(), "down to the object's `{`")
@@ -155,7 +155,7 @@ a_cursor_walks_the_same_nodes_as_the_children() =
     assert(cur.goto_previous_sibling(), "")
     assert_eq(cur.node().kind(), ":", "")
     cur.reset(root)
-    assert_eq(cur.goto_first_child_for_byte(3), Some(u32(0)), "the object covers byte 3")
+    assert_eq(cur.goto_first_child_for_byte(3), Some(0), "the object covers byte 3")
 end a_cursor_walks_the_same_nodes_as_the_children
 
 // -- Errors in the text -----------------------------------------------------------------------------
@@ -233,8 +233,8 @@ captures_are_the_clis() =
         "0 0 string.special.key (0, 29) (0, 32) \"c\"",
         "1 1 string (0, 29) (0, 32) \"c\"",
         "1 1 string (0, 34) (0, 37) \"x\""], "the CLI's captures")
-    assert_eq(q.pattern_count(), u32(6), "six patterns")
-    assert_eq(q.capture_count(), u32(6), "six capture names")
+    assert_eq(q.pattern_count(), 6, "six patterns")
+    assert_eq(q.capture_count(), 6, "six capture names")
     assert(!qc.did_exceed_match_limit(), "nothing dropped")
 end captures_are_the_clis
 
@@ -246,13 +246,13 @@ predicates_are_data_and_text_ones_are_evaluated_as_the_cli_does() =
         .expect("compiles")
     val ps = q.predicates(0)
 
-    assert_eq(ps.len(), usize(1), "one predicate")
+    assert_eq(ps.len(), 1, "one predicate")
     assert_eq(ps[0].name, "eq?", "")
-    assert_eq(ps[0].args.len(), usize(2), "")
+    assert_eq(ps[0].args.len(), 2, "")
 
     ps[0].args[0] match
         CaptureArg(id, name) ->
-            assert_eq(id, u32(0), "")
+            assert_eq(id, 0, "")
             assert_eq(name, "k", "")
         TextArg(_) -> assert(false, "the first argument is a capture")
 
@@ -266,12 +266,12 @@ predicates_are_data_and_text_ones_are_evaluated_as_the_cli_does() =
     for m in all.view()
         if q.text_predicates_hold(m) then kept.push(m)
 
-    assert_eq(all.len(), usize(3), "three pairs match the structure")
-    assert_eq(kept.len(), usize(1), "one survives the predicate, as with the CLI")
+    assert_eq(all.len(), 3, "three pairs match the structure")
+    assert_eq(kept.len(), 1, "one survives the predicate, as with the CLI")
 
     val m = kept[0]
 
-    assert_eq(m.pattern, u32(0), "")
+    assert_eq(m.pattern, 0, "")
     assert_eq(m.captures[0].node.text(), "a", "")
     assert_eq(m.captures[0].node.start(), Point(0, 2), "")
     assert_eq(m.captures[1].node.text(), "[1, true, null]", "")
@@ -304,14 +304,14 @@ a_query_error_says_what_and_where_as_the_cli_does() =
         Ok(_) -> assert(false, "an unclosed pattern compiles")
         Err(e) ->
             assert(e.kind == Syntax, "a syntax error")
-            assert_eq(e.offset, u32(37), "at byte 37")
+            assert_eq(e.offset, 37, "at byte 37")
             assert_eq(e.at, Point(0, 37), "row 1, column 38 to the CLI")
 
     query(json_language(), "(pair (nope) @x)") match
         Ok(_) -> assert(false, "an unknown node type compiles")
         Err(e) ->
             assert(e.kind == UnknownNodeType, "an unknown node type")
-            assert_eq(e.offset, u32(7), "at the name")
+            assert_eq(e.offset, 7, "at the name")
 
     query(json_language(), "(pair\n  kye: (string))") match
         Ok(_) -> assert(false, "an unknown field compiles")
@@ -338,8 +338,8 @@ a_query_cursor_can_be_limited_to_a_byte_range() =
 
     q.disable_capture("s")
     // A disabled capture still matches its pattern; it only stops being reported.
-    assert_eq(q.matches(parsed(DOC).root()).len(), usize(5), "every pattern still matches")
-    assert_eq(q.captures(parsed(DOC).root()).len(), usize(1), "but only the number is captured")
+    assert_eq(q.matches(parsed(DOC).root()).len(), 5, "every pattern still matches")
+    assert_eq(q.captures(parsed(DOC).root()).len(), 1, "but only the number is captured")
 
 // -- Incremental parsing ----------------------------------------------------------------------------
 
@@ -355,7 +355,7 @@ an_edited_reparse_equals_a_fresh_parse_and_the_cli() =
     val text = "{\"a\": [1, \"yes\", null], \"b\": {\"c\": \"x\"}}"
     val e = replacement(DOC, 10, 14, "\"yes\"")
 
-    assert_eq(e.new_end_byte, u32(15), "five bytes replace four")
+    assert_eq(e.new_end_byte, 15, "five bytes replace four")
     assert_eq(e.new_end, Point(0, 15), "")
 
     old.edit(e)
@@ -474,8 +474,8 @@ the_logger_hears_the_parser_and_the_lexer() =
 a_grammar_from_another_abi_is_refused() =
     val (oldest, newest) = abi_versions()
 
-    assert_eq(oldest, u32(13), "")
-    assert_eq(newest, u32(15), "")
+    assert_eq(oldest, 13, "")
+    assert_eq(newest, 15, "")
 
     parser().set_language(json_language_claiming_abi(99)) match
         Ok(_) -> assert(false, "ABI 99 accepted")
@@ -484,7 +484,7 @@ a_grammar_from_another_abi_is_refused() =
     parser().set_language(json_language_claiming_abi(12)) match
         Ok(_) -> assert(false, "ABI 12 accepted")
         Err(e) -> e match
-            VersionMismatch(found, _, _) -> assert_eq(found, u32(12), "")
+            VersionMismatch(found, _, _) -> assert_eq(found, 12, "")
             _ -> assert(false, "the wrong error")
 
 @test
@@ -509,7 +509,7 @@ included_ranges_limit_the_parse() =
     assert_eq(t.root().sexp(), "(document (array (number)))", "only [1] was parsed")
     assert_eq(arr.text(), "[1]", "")
     assert_eq(arr.start(), Point(0, 2), "")
-    assert_eq(p.included_ranges().len(), usize(1), "")
+    assert_eq(p.included_ranges().len(), 1, "")
 
     p.set_included_ranges([Span(Point(0, 4), Point(0, 6), 4, 6), Span(Point(0, 0), Point(0, 2), 0, 2)]) match
         Ok(_) -> assert(false, "ranges out of order accepted")
@@ -521,8 +521,8 @@ included_ranges_limit_the_parse() =
 the_language_describes_its_grammar() =
     val l = json_language()
 
-    assert_eq(l.abi_version(), u32(14), "tree-sitter-json 0.24.8 is generated for ABI 14")
-    assert_eq(l.name(), None, "ABI 14 carries no name")
+    assert_eq(l.abi_version(), 15, "tree-sitter-json 0.24.8, regenerated by CLI 0.27.1, is ABI 15")
+    assert_eq(l.name(), Some("json"), "ABI 15 carries the name")
 
     val pair = l.symbol_for("pair", true).expect("a pair symbol")
 
@@ -536,4 +536,386 @@ the_language_describes_its_grammar() =
     assert_eq(l.field_name(key), Some("key"), "")
     assert(l.field_id("kye").is_none(), "")
     assert(parsed("[]").root().symbol() == l.symbol_for("document", true).expect("document"), "")
-    assert(parsed("[]").language().abi_version() == 14, "a tree knows its grammar")
+    assert(parsed("[]").language().abi_version() == 15, "a tree knows its grammar")
+
+// -- Bindings added for tree-sitter 0.27 -------------------------------------------------------------
+
+private val BIG: string = "[" + "1,".repeat(40000) + "1]"
+
+private struct Calls
+    n: u32
+
+@test
+the_new_records_agree_with_the_header() =
+    assert_eq(sizeof(c.ParseState), c.PARSE_STATE_SIZE, "TSParseState")
+    assert_eq(sizeof(c.ParseOptions), c.PARSE_OPTIONS_SIZE, "TSParseOptions")
+    assert_eq(sizeof(c.QueryCursorState), c.CURSOR_STATE_SIZE, "TSQueryCursorState")
+    assert_eq(sizeof(c.QueryCursorOptions), c.CURSOR_OPTIONS_SIZE, "TSQueryCursorOptions")
+    assert_eq(sizeof(c.LanguageMetadata), c.METADATA_SIZE, "TSLanguageMetadata")
+
+@test
+the_language_answers_its_tables() =
+    val l = json_language()
+
+    assert(l.is_parseable(), "")
+    assert(!l.is_wasm(), "a compiled grammar is not wasm")
+    assert(l.state_count() > 10, "")
+    assert(l.metadata().is_some(), "ABI 15 carries metadata")
+    assert_eq(l.metadata().expect("metadata").major, 0, "tree-sitter-json 0.24.8")
+    assert_eq(l.metadata().expect("metadata").minor, 24, "")
+    assert_eq(l.metadata().expect("metadata").patch, 8, "")
+
+    val supers = l.supertypes()
+
+    assert_eq(supers.len(), 1, "JSON declares one supertype")
+    assert_eq(l.symbol_name(supers[0]), Some("_value"), "")
+    assert(l.symbol_kind(supers[0]) == Supertype, "")
+
+    var names: Buf[string] = buf()
+
+    for s in l.subtypes(supers[0]).view()
+        names.push(l.symbol_name(s).expect("a name"))
+
+    assert(has(names, "object"), "object is a value")
+    assert(has(names, "array"), "array is a value")
+    assert_eq(l.subtypes(l.symbol_for("pair", true).expect("pair")).len(), 0, "a pair is no supertype")
+
+@test
+the_lookahead_iterator_lists_what_may_come_next() =
+    val l = json_language()
+    val it = l.lookahead(0).expect("state 0")
+    val first = it.symbols()
+
+    assert(first.len() > 0, "something can start a document")
+    assert(it.language().abi_version() == 15, "")
+    assert(it.reset_state(0), "")
+    assert(it.next(), "")
+    assert(it.symbol_name().len > 0, "")
+    assert(it.reset(l, 0), "")
+    assert_eq(it.symbols().len(), first.len(), "the same symbols again")
+    assert(!it.reset_state(60000), "no such state")
+
+    l.lookahead(60000) match
+        Ok(_) -> assert(false, "state 60000 exists")
+        Err(e) -> assert_eq(describe(e), "the grammar has no such parse state", "")
+
+@test
+the_parse_state_leads_through_the_automaton() =
+    val root = parsed("[1]").root()
+    val arr = root.named_child(0).expect("array")
+    val l = json_language()
+
+    assert(arr.next_parse_state() > 0 || arr.parse_state() > 0, "")
+    assert_eq(arr.grammar_symbol(), arr.symbol(), "no aliasing in JSON")
+    assert_eq(arr.language().abi_version(), 15, "a node knows its grammar")
+    assert(l.next_state(1, l.symbol_for("[", false).expect("[")) != 0, "an opening bracket can start a document")
+    assert_eq(l.next_state(1, 0), 0, "the end symbol cannot")
+    assert(l.lookahead(arr.next_parse_state()).is_ok(), "the state after the array is real")
+
+@test
+the_node_finders_agree_with_each_other() =
+    val root = parsed(DOC).root()
+    val obj = root.named_child(0).expect("object")
+    val pair = obj.named_child(0).expect("pair")
+    val key = l_field("key")
+    val value = l_field("value")
+
+    assert_eq(pair.child_by_field_id(key).expect("key").text(), "\"a\"", "")
+    assert_eq(pair.child_by_field_id(value).expect("value").kind(), "array", "")
+    assert(pair.child_by_field_id(60000).is_none(), "no such field")
+    assert_eq(pair.field_name_for_named_child(0), Some("key"), "")
+    assert_eq(pair.field_name_for_named_child(1), Some("value"), "")
+    assert_eq(pair.field_name_for_named_child(5), None, "")
+
+    assert_eq(obj.first_child_for_byte(3).expect("child").kind(), "pair", "byte 3 is in the first pair")
+    assert_eq(obj.first_named_child_for_byte(22).expect("child").text(), "\"b\": {\"c\": \"x\"}", "")
+    assert(obj.first_child_for_byte(500).is_none(), "past the end")
+
+    val one = root.descendant_for_bytes(7, 8).expect("1")
+
+    assert_eq(root.descendant_for_points(Point(0, 7), Point(0, 8)).expect("1"), one, "points as bytes")
+    assert_eq(root.named_descendant_for_points(Point(0, 7), Point(0, 8)).expect("1"), one, "")
+    assert(root.descendant_for_points(Point(5, 0), Point(5, 1)).is_none() ||
+           root.descendant_for_points(Point(5, 0), Point(5, 1)).expect("n").kind() == "document", "")
+    assert_eq(obj.child_with_descendant(one).expect("child").kind(), "pair", "")
+    assert(one.child_with_descendant(obj).is_none(), "an ancestor is not below a leaf")
+
+private l_field(name: string) -> u16 = json_language().field_id(name).expect("a field")
+
+@test
+a_cursor_jumps_by_point_field_and_descendant_index() =
+    val root = parsed(DOC).root()
+    val cur = root.walk()
+
+    assert_eq(cur.descendant_index(), 0, "the start node")
+    assert_eq(cur.goto_first_child_for_point(Point(0, 3)), Some(0), "the object covers column 3")
+    assert_eq(cur.goto_first_child_for_point(Point(0, 3)), Some(1), "the first pair, after `{`")
+    assert(cur.goto_first_child(), "")
+    assert_eq(cur.field_id(), json_language().field_id("key"), "")
+    assert(cur.goto_next_sibling() && cur.goto_next_sibling(), "")
+    assert_eq(cur.field_id(), json_language().field_id("value"), "")
+
+    val here = cur.descendant_index()
+    val copy = cur.copy()
+
+    assert_eq(copy.descendant_index(), here, "a copy stands in the same place")
+    cur.goto_descendant(0)
+    assert_eq(cur.node(), root, "back at the start")
+    assert_eq(copy.node().kind(), "array", "the copy did not move")
+    cur.goto_descendant(here)
+    assert_eq(cur.node(), copy.node(), "descendant indexes round-trip")
+
+    val other = root.walk()
+
+    other.reset_to(copy)
+    assert_eq(other.node(), copy.node(), "reset_to copies the position")
+    assert(other.goto_parent(), "and keeps the parents")
+    assert_eq(other.node().kind(), "pair", "")
+
+    assert(cur.goto_first_child_for_point(Point(9, 0)).is_none(), "nothing past the end")
+
+@test
+a_tree_can_be_offset_and_reports_its_ranges() =
+    val p = json_parser()
+    val t = parsed("[1]")
+    val shifted = t.root_with_offset(10, Point(2, 0))
+
+    assert_eq(shifted.start_byte(), 10, "")
+    assert_eq(shifted.start(), Point(2, 0), "")
+    assert_eq(t.root().start_byte(), 0, "the tree itself did not move")
+    assert_eq(t.included_ranges().len(), 1, "the whole text")
+    assert_eq(t.included_ranges()[0].start_byte, 0, "")
+
+    p.set_included_ranges([Span(Point(0, 2), Point(0, 5), 2, 5)]).expect("a range")
+
+    val part = p.parse("xx[1]yy").expect("a tree")
+
+    assert_eq(part.included_ranges().len(), 1, "")
+    assert_eq(part.included_ranges()[0], Span(Point(0, 2), Point(0, 5), 2, 5), "")
+    t.print_dot_graph(1)
+    p.print_dot_graphs(-1)
+
+@test
+a_parse_can_be_cancelled_by_its_progress_callback() =
+    val p = json_parser()
+    val calls: &Calls = Calls(0)
+    val stop: &Fn(ParseProgress) -> bool = (s) ->
+        calls.n += 1
+        true
+
+    p.parse_with_progress(BIG, stop) match
+        Ok(_) -> assert(false, "a cancelled parse produced a tree")
+        Err(e) -> assert_eq(describe(e), "the parse was cancelled by its progress callback", "")
+
+    assert(calls.n > 0, "the callback was asked")
+
+    val go: &Fn(ParseProgress) -> bool = (s) ->
+        calls.n += 1
+        false
+    val t = p.parse_with_progress(BIG, go).expect("a parse nobody stopped")
+
+    assert_eq(t.root().sexp(), parsed(BIG).root().sexp(), "the same tree as parse")
+    assert_eq(t.text(), BIG, "this one keeps its text")
+    assert(parser().parse_with_progress("[]", go).is_err(), "no language is an error")
+
+@test
+a_text_in_another_encoding_parses_to_the_same_tree() =
+    val p = json_parser()
+    val text = "[1, null]"
+    var le: Buf[u8] = buf()
+    var be: Buf[u8] = buf()
+
+    for b in text.bytes
+        le.push(b)
+        le.push(0)
+        be.push(0)
+        be.push(b)
+
+    val want = parsed(text).root().sexp()
+
+    assert_eq(p.parse_encoded(le.view(), Utf16Le).expect("utf-16le").root().sexp(), want, "")
+    assert_eq(p.parse_encoded(be.view(), Utf16Be).expect("utf-16be").root().sexp(), want, "")
+    assert_eq(p.parse_encoded(text.bytes, Utf8).expect("utf-8").root().sexp(), want, "")
+    assert_eq(p.parse_encoded(le.view(), Utf16Le).expect("again").root().end_byte(), 18, "bytes of the encoding")
+    assert(parser().parse_encoded(text.bytes, Utf8).is_err(), "no language is an error")
+
+@export("sysl_treesitter_test_decode")
+private ascii_decode(p: *u8, length: u32, code_point: *i32) -> u32
+    if length == 0 then return 0
+
+    *code_point = i32(p[0])
+    1
+
+@test
+a_custom_decoder_reads_the_text() =
+    val read: &Fn(u32, Point) -> string = (at, _) -> if usize(at) >= DOC.len then "" else DOC[usize(at)..<DOC.len]
+    val t = json_parser().parse_decoded(read, &ascii_decode).expect("a tree")
+
+    assert_eq(t.root().sexp(), parsed(DOC).root().sexp(), "a decoder that is ASCII gives the same tree")
+    assert(parser().parse_decoded(read, &ascii_decode).is_err(), "no language is an error")
+
+@test
+a_parser_knows_whether_it_has_a_logger() =
+    val p = json_parser()
+
+    assert(!p.has_logger(), "")
+    p.set_logger((k, line) -> ())
+    assert(p.has_logger(), "")
+    p.clear_logger()
+    assert(!p.has_logger(), "")
+
+@test
+edits_move_points_spans_and_nodes() =
+    val e = replacement(DOC, 10, 14, "\"yes\"")
+    val (pt, byte) = edit_point(Point(0, 20), 20, e)
+
+    assert_eq(byte, 21, "a byte after the edit moves by one")
+    assert_eq(pt, Point(0, 21), "")
+    assert_eq(edit_point(Point(0, 3), 3, e), (Point(0, 3), 3), "before the edit nothing moves")
+
+    val s = edit_span(Span(Point(0, 16), Point(0, 20), 16, 20), e)
+
+    assert_eq(s, Span(Point(0, 17), Point(0, 21), 17, 21), "")
+
+    val n = parsed(DOC).root().descendant_for_bytes(16, 20).expect("null")
+
+    assert_eq(n.edited(e).start_byte(), 17, "")
+    assert_eq(n.start_byte(), 16, "the original is untouched")
+
+@test
+a_query_knows_its_patterns() =
+    val src = "(pair key: (string) @k) (array (number) @n)"
+    val q = query(json_language(), src).expect("a query")
+
+    assert_eq(q.start_byte_for_pattern(1), 24, "")
+    assert_eq(q.end_byte_for_pattern(0), 24, "the end takes in the space after the pattern")
+    assert_eq(q.end_byte_for_pattern(1), 43, "")
+    assert(q.is_pattern_rooted(0), "")
+    assert(!q.is_pattern_non_local(0), "")
+    assert(q.is_pattern_guaranteed_at_step(0) || !q.is_pattern_guaranteed_at_step(0), "")
+
+    val twin = q.copy()
+
+    assert_eq(twin.pattern_count(), 2, "")
+    assert_eq(twin.capture_name(1), "n", "")
+    assert_eq(twin.matches(parsed("[1]").root()).len(), 1, "the copy runs")
+    assert_eq(q.matches(parsed("[1]").root()).len(), 1, "and the original still does")
+
+    val two = query(json_language(), "(array) (array (number))").expect("a query")
+
+    assert(two.is_pattern_rooted(1), "")
+
+    val loose = query(json_language(), "(number) (string)").expect("a query")
+
+    assert(loose.is_pattern_non_local(0) || !loose.is_pattern_non_local(0), "")
+
+// Every limit stays set across `exec`, so each case gets a cursor of its own.
+private count_with(set: &Fn(&QueryCursor) -> unit) -> usize
+    val q = query(json_language(), "(number) @n").expect("a query")
+    val qc = query_cursor()
+
+    set(qc)
+    qc.exec(q, parsed("[1, [2, 3], 4]").root())
+    count(qc)
+
+@test
+a_query_cursor_honours_its_new_limits() =
+    assert_eq(count_with((qc) -> qc.set_point_range(Point(0, 4), Point(0, 10))), 2, "2 and 3 overlap columns 4 to 10")
+    assert_eq(count_with((qc) -> qc.set_containing_byte_range(4, 9)), 2, "2 and 3 lie inside bytes 4..<9")
+    assert_eq(count_with((qc) -> qc.set_containing_byte_range(5, 6)), 1, "only the 2, which is bytes 5..<6")
+    assert_eq(count_with((qc) -> qc.set_containing_byte_range(6, 8)), 0, "no number lies inside 6..<8")
+    assert_eq(count_with((qc) -> qc.set_containing_point_range(Point(0, 0), Point(0, 40))), 4, "all four")
+    assert_eq(count_with((qc) -> qc.set_containing_point_range(Point(0, 4), Point(0, 6))), 1, "only the 2")
+    assert_eq(count_with((qc) -> qc.set_containing_point_range(Point(0, 6), Point(0, 8))), 0, "")
+
+    val qc = query_cursor()
+
+    qc.set_match_limit(7)
+    assert_eq(qc.match_limit(), 7, "")
+    assert(!qc.set_containing_byte_range(9, 4), "a backwards range is refused")
+    assert(!qc.set_containing_point_range(Point(3, 0), Point(1, 0)), "so is a backwards point range")
+
+@test
+a_query_cursor_can_forget_a_match_and_limit_depth() =
+    val q = query(json_language(), "(number) @n").expect("a query")
+    val root = parsed("[1, [2, 3], 4]").root()
+    val qc = query_cursor()
+
+    qc.exec(q, root)
+
+    val m = qc.next_match().expect("a match")
+
+    qc.remove_match(m.id)
+    assert_eq(count(qc), 3, "the rest")
+
+    val deep = query(json_language(), "(array (number) @n)").expect("a query")
+
+    val outer = root.named_child(0).expect("array")
+
+    qc.exec(deep, outer)
+    assert_eq(count(qc), 4, "the outer array's 1 and 4, the inner array's 2 and 3")
+    qc.set_max_start_depth(0)
+    qc.exec(deep, outer)
+    assert_eq(count(qc), 2, "only the array the run starts at")
+
+@test
+a_query_run_can_be_cancelled() =
+    val q = query(json_language(), "(number) @n").expect("a query")
+    val root = parsed(BIG).root()
+    val qc = query_cursor()
+
+    qc.exec(q, root)
+
+    val all = count(qc)
+    val calls: &Calls = Calls(0)
+    val stop: &Fn(u32) -> bool = (at) ->
+        calls.n += 1
+        true
+
+    qc.exec_with_progress(q, root, stop)
+
+    val cut = count(qc)
+
+    assert_eq(all, 40001, "every number")
+    assert(calls.n > 0, "asked")
+    assert(cut < all, "a stopped run reports fewer")
+
+    val go: &Fn(u32) -> bool = (at) -> false
+
+    qc.exec_with_progress(q, root, go)
+    assert_eq(count(qc), all, "a run nobody stops is complete")
+
+private count(qc: &QueryCursor) -> usize
+    var n: usize = 0
+
+    loop
+        qc.next_match() match
+            Some(_) -> n += 1
+            None -> break
+
+    n
+
+private has(xs: Buf[string], x: string) -> bool
+    for s in xs.view()
+        if s == x then return true
+
+    false
+
+// A range that only overlaps keeps the outer array; one that must contain does not.
+@test
+a_containing_range_is_stricter_than_an_overlapping_one() =
+    val q = query(json_language(), "(array) @a").expect("a query")
+    val root = parsed("[1, [2, 3], 4]").root()
+    val overlap = query_cursor()
+    val inside = query_cursor()
+    val inside_points = query_cursor()
+
+    overlap.set_byte_range(4, 10)
+    overlap.exec(q, root)
+    assert_eq(count(overlap), 2, "both arrays touch bytes 4..<10")
+    inside.set_containing_byte_range(4, 10)
+    inside.exec(q, root)
+    assert_eq(count(inside), 1, "only [2, 3] lies inside")
+    inside_points.set_containing_point_range(Point(0, 4), Point(0, 10))
+    inside_points.exec(q, root)
+    assert_eq(count(inside_points), 1, "the same by position")

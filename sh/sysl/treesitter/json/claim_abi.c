@@ -13,6 +13,6 @@ const TSLanguage *sysl_treesitter_json_with_abi(uint32_t version) {
   static TSLanguage copy;
 
   memcpy(&copy, tree_sitter_json(), sizeof copy);
-  copy.version = version;
+  copy.abi_version = version;
   return &copy;
 }

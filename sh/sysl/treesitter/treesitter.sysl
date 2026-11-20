@@ -1,6 +1,7 @@
 module sh.sysl.treesitter
 
 import sh.sysl.treesitter.c
+import sysl.buf.{Buf, buf}
 import sysl.slices.as_ptr
 import sysl.text.from_cstring
 
@@ -119,6 +120,23 @@ private[treesitter] c_edit(e: Edit) -> c.InputEdit =
     c.InputEdit(e.start_byte, e.old_end_byte, e.new_end_byte, c_point(e.start), c_point(e.old_end),
                 c_point(e.new_end))
 
+/** Where `p`, at byte offset `byte`, ends up after `e`: its position and its byte offset. */
+edit_point(p: Point, byte: u32, e: Edit) -> (Point, u32)
+    var cp = c_point(p)
+    var b = byte
+    var ce = c_edit(e)
+
+    c.point_edit(&cp, &b, &ce)
+    (point_of(cp), b)
+
+/** Where `s` ends up after `e`. */
+edit_span(s: Span, e: Edit) -> Span
+    var cr = c_range(s)
+    var ce = c_edit(e)
+
+    c.range_edit(&cr, &ce)
+    range_of(cr)
+
 // ## A language
 
 /** What kind of symbol a grammar declares. */
@@ -166,7 +184,94 @@ struct Language
         val f = c.language_field_id_for_name(self.raw, bytes_ptr(name), u32(name.len))
 
         if f == 0 then None else Some(f)
+
+    /** Whether the grammar's tables are complete enough to parse with. */
+    is_parseable(self) -> bool = c.language_is_parseable(self.raw)
+
+    /** Whether the grammar is a WebAssembly one. Always false here: the library is built without
+     * a wasm engine, so no grammar can be loaded that way.
+     */
+    is_wasm(self) -> bool = c.language_is_wasm(self.raw)
+
+    /** How many parse states the grammar's automaton has. */
+    state_count(self) -> u32 = c.language_state_count(self.raw)
+
+    /** The grammar's own version (its `tree-sitter.json`), where it was generated with one. */
+    metadata(self) -> Option[LanguageVersion]
+        val m = c.language_metadata(self.raw)
+
+        if m == null then None else Some(LanguageVersion(m.major_version, m.minor_version, m.patch_version))
+
+    /** The supertype symbols, like JSON's `_value`: kinds that only stand for one of several others. */
+    supertypes(self) -> Buf[u16]
+        var n: u32 = 0
+
+        symbols_of(c.language_supertypes(self.raw, &n), n)
+
+    /** The kinds a supertype stands for. */
+    subtypes(self, supertype: u16) -> Buf[u16]
+        var n: u32 = 0
+
+        symbols_of(c.language_subtypes(self.raw, supertype, &n), n)
+
+    /** The state the parser reaches from `state` on `symbol`, which has to be a grammar symbol
+     * (`Node.grammar_symbol`), not an aliased one.
+     */
+    next_state(self, state: u16, symbol: u16) -> u16 = c.language_next_state(self.raw, state, symbol)
+
+    /** An iterator over the symbols that may come next in `state`. */
+    lookahead(self, state: u16) -> Result[&LookaheadIterator, Error]
+        val it = c.lookahead_iterator_new(self.raw, state)
+
+        if it == null then Err(BadState) else Ok(LookaheadIterator(it))
 end Language
+
+/** A grammar's own `major.minor.patch`. */
+struct LanguageVersion
+    major: u8
+    minor: u8
+    patch: u8
+
+private[treesitter] symbols_of(p: *u16, n: u32) -> Buf[u16]
+    var out: Buf[u16] = buf()
+
+    for i in 0..<n
+        out.push(p[i])
+
+    out
+
+/** The symbols the parser could accept next in some state, one at a time: `next` moves to the
+ * following one and answers whether there is one.
+ */
+struct LookaheadIterator
+    private[treesitter] raw: *c.LookaheadIterator
+
+    next(*self) -> bool = c.lookahead_iterator_next(self.raw)
+
+    symbol(*self) -> u16 = c.lookahead_iterator_current_symbol(self.raw)
+
+    symbol_name(*self) -> string = text_of(c.lookahead_iterator_current_symbol_name(self.raw))
+
+    language(*self) -> Language = Language(c.lookahead_iterator_language(self.raw))
+
+    /** Starts again at `state` of the same grammar; false where the state does not exist. */
+    reset_state(*self, state: u16) -> bool = c.lookahead_iterator_reset_state(self.raw, state)
+
+    /** Starts again at `state` of another grammar; false where the state does not exist. */
+    reset(*self, l: Language, state: u16) -> bool = c.lookahead_iterator_reset(self.raw, l.raw, state)
+
+    /** Every remaining symbol. */
+    symbols(*self) -> Buf[u16]
+        var out: Buf[u16] = buf()
+
+        while self.next()
+            out.push(self.symbol())
+
+        out
+end LookaheadIterator
+
+impl Drop for LookaheadIterator
+    drop(self) = c.lookahead_iterator_delete(self.raw)
 
 /** A grammar's `tree_sitter_<name>()` answer, as a `Language`. This is what a grammar package calls. */
 language(raw: *c.Language) -> Language = Language(raw)
@@ -187,12 +292,20 @@ enum Error
     /** The included ranges overlap or are out of order. */
     BadRanges
 
+    /** A progress callback asked the parse to stop. */
+    Cancelled
+
+    /** The state number is not one of the grammar's. */
+    BadState
+
 /** One sentence for an `Error`. */
 describe(e: Error) -> string = e match
     VersionMismatch(found, oldest, newest) ->
         s"the grammar's ABI version is $found; this tree-sitter reads $oldest to $newest"
     NoLanguage -> "the parser has no language: call set_language first"
     BadRanges -> "the included ranges overlap or are out of order"
+    Cancelled -> "the parse was cancelled by its progress callback"
+    BadState -> "the grammar has no such parse state"
 
 // ## The two string shapes C hands back
 

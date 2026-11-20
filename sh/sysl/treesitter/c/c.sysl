@@ -76,7 +76,35 @@ struct Logger
     payload: *u8
     log: *extern(*u8, u32, *u8) -> unit
 
+/** `TSParseState`: what a parse progress callback is shown. */
+struct ParseState
+    payload: *u8
+    current_byte_offset: u32
+    has_error: bool
+
+/** `TSParseOptions`. */
+struct ParseOptions
+    payload: *u8
+    progress_callback: *extern(*ParseState) -> bool
+
+/** `TSQueryCursorState`: what a query progress callback is shown. */
+struct QueryCursorState
+    payload: *u8
+    current_byte_offset: u32
+
+/** `TSQueryCursorOptions`. */
+struct QueryCursorOptions
+    payload: *u8
+    progress_callback: *extern(*QueryCursorState) -> bool
+
+/** `TSLanguageMetadata`. */
+struct LanguageMetadata
+    major_version: u8
+    minor_version: u8
+    patch_version: u8
+
 // The opaque handles. Nothing on this side ever sees inside one.
+opaque struct LookaheadIterator
 opaque struct Language
 opaque struct Parser
 opaque struct Tree
@@ -95,11 +123,19 @@ c const
     INPUT_SIZE:         usize = "sizeof(TSInput)"
     LOGGER_SIZE:        usize = "sizeof(TSLogger)"
     STEP_SIZE:          usize = "sizeof(TSQueryPredicateStep)"
+    PARSE_STATE_SIZE:   usize = "sizeof(TSParseState)"
+    PARSE_OPTIONS_SIZE: usize = "sizeof(TSParseOptions)"
+    CURSOR_STATE_SIZE:  usize = "sizeof(TSQueryCursorState)"
+    CURSOR_OPTIONS_SIZE: usize = "sizeof(TSQueryCursorOptions)"
+    METADATA_SIZE:      usize = "sizeof(TSLanguageMetadata)"
 
     LANGUAGE_VERSION:   u32 = "TREE_SITTER_LANGUAGE_VERSION"
     MIN_COMPATIBLE_LANGUAGE_VERSION: u32 = "TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION"
 
     ENCODING_UTF8:      u32 = "TSInputEncodingUTF8"
+    ENCODING_UTF16LE:   u32 = "TSInputEncodingUTF16LE"
+    ENCODING_UTF16BE:   u32 = "TSInputEncodingUTF16BE"
+    ENCODING_CUSTOM:    u32 = "TSInputEncodingCustom"
 
     LOG_PARSE:          u32 = "TSLogTypeParse"
     LOG_LEX:            u32 = "TSLogTypeLex"
@@ -140,6 +176,10 @@ extern "ts_parser_set_language" parser_set_language(p: *Parser, l: *Language) ->
 extern "ts_parser_set_included_ranges" parser_set_included_ranges(p: *Parser, ranges: *Range, count: u32) -> bool
 extern "ts_parser_included_ranges" parser_included_ranges(p: *Parser, count: *u32) -> *Range
 extern "ts_parser_parse" parser_parse(p: *Parser, old: *Tree, input: Input) -> *Tree
+extern "ts_parser_parse_with_options" parser_parse_with_options(p: *Parser, old: *Tree, input: Input, options: ParseOptions) -> *Tree
+extern "ts_parser_parse_string_encoding" parser_parse_string_encoding(p: *Parser, old: *Tree, s: *u8, length: u32, encoding: u32) -> *Tree
+extern "ts_parser_logger" parser_logger(p: *Parser) -> Logger
+extern "ts_parser_print_dot_graphs" parser_print_dot_graphs(p: *Parser, fd: i32)
 extern "ts_parser_parse_string" parser_parse_string(p: *Parser, old: *Tree, s: *u8, length: u32) -> *Tree
 extern "ts_parser_reset" parser_reset(p: *Parser)
 extern "ts_parser_set_logger" parser_set_logger(p: *Parser, logger: Logger)
@@ -149,6 +189,9 @@ extern "ts_parser_set_logger" parser_set_logger(p: *Parser, logger: Logger)
 extern "ts_tree_copy" tree_copy(t: *Tree) -> *Tree
 extern "ts_tree_delete" tree_delete(t: *Tree)
 extern "ts_tree_root_node" tree_root_node(t: *Tree) -> Node
+extern "ts_tree_root_node_with_offset" tree_root_node_with_offset(t: *Tree, offset_bytes: u32, offset_extent: Point) -> Node
+extern "ts_tree_included_ranges" tree_included_ranges(t: *Tree, length: *u32) -> *Range
+extern "ts_tree_print_dot_graph" tree_print_dot_graph(t: *Tree, fd: i32)
 extern "ts_tree_language" tree_language(t: *Tree) -> *Language
 extern "ts_tree_edit" tree_edit(t: *Tree, edit: *InputEdit)
 extern "ts_tree_get_changed_ranges" tree_get_changed_ranges(old: *Tree, new: *Tree, length: *u32) -> *Range
@@ -186,6 +229,19 @@ extern "ts_node_descendant_count" node_descendant_count(n: Node) -> u32
 extern "ts_node_descendant_for_byte_range" node_descendant_for_byte_range(n: Node, start: u32, end: u32) -> Node
 extern "ts_node_named_descendant_for_byte_range" node_named_descendant_for_byte_range(n: Node, start: u32, end: u32) -> Node
 extern "ts_node_eq" node_eq(a: Node, b: Node) -> bool
+extern "ts_node_language" node_language(n: Node) -> *Language
+extern "ts_node_grammar_symbol" node_grammar_symbol(n: Node) -> u16
+extern "ts_node_next_parse_state" node_next_parse_state(n: Node) -> u16
+extern "ts_node_child_with_descendant" node_child_with_descendant(n: Node, descendant: Node) -> Node
+extern "ts_node_field_name_for_named_child" node_field_name_for_named_child(n: Node, i: u32) -> *u8
+extern "ts_node_child_by_field_id" node_child_by_field_id(n: Node, id: u16) -> Node
+extern "ts_node_first_child_for_byte" node_first_child_for_byte(n: Node, byte: u32) -> Node
+extern "ts_node_first_named_child_for_byte" node_first_named_child_for_byte(n: Node, byte: u32) -> Node
+extern "ts_node_descendant_for_point_range" node_descendant_for_point_range(n: Node, start: Point, end: Point) -> Node
+extern "ts_node_named_descendant_for_point_range" node_named_descendant_for_point_range(n: Node, start: Point, end: Point) -> Node
+extern "ts_node_edit" node_edit(n: *Node, edit: *InputEdit)
+extern "ts_point_edit" point_edit(p: *Point, byte: *u32, edit: *InputEdit)
+extern "ts_range_edit" range_edit(r: *Range, edit: *InputEdit)
 
 // ## Tree cursor
 
@@ -201,11 +257,22 @@ extern "ts_tree_cursor_goto_first_child" tree_cursor_goto_first_child(c: *TreeCu
 extern "ts_tree_cursor_goto_last_child" tree_cursor_goto_last_child(c: *TreeCursor) -> bool
 extern "ts_tree_cursor_current_depth" tree_cursor_current_depth(c: *TreeCursor) -> u32
 extern "ts_tree_cursor_goto_first_child_for_byte" tree_cursor_goto_first_child_for_byte(c: *TreeCursor, byte: u32) -> i64
+extern "ts_tree_cursor_goto_first_child_for_point" tree_cursor_goto_first_child_for_point(c: *TreeCursor, p: Point) -> i64
+extern "ts_tree_cursor_goto_descendant" tree_cursor_goto_descendant(c: *TreeCursor, index: u32)
+extern "ts_tree_cursor_current_descendant_index" tree_cursor_current_descendant_index(c: *TreeCursor) -> u32
+extern "ts_tree_cursor_current_field_id" tree_cursor_current_field_id(c: *TreeCursor) -> u16
+extern "ts_tree_cursor_copy" tree_cursor_copy(c: *TreeCursor) -> TreeCursor
+extern "ts_tree_cursor_reset_to" tree_cursor_reset_to(dst: *TreeCursor, src: *TreeCursor)
 
 // ## Query
 
 extern "ts_query_new" query_new(l: *Language, source: *u8, length: u32, error_offset: *u32, error_type: *u32) -> *Query
 extern "ts_query_delete" query_delete(q: *Query)
+extern "ts_query_copy" query_copy(q: *Query) -> *Query
+extern "ts_query_end_byte_for_pattern" query_end_byte_for_pattern(q: *Query, i: u32) -> u32
+extern "ts_query_is_pattern_rooted" query_is_pattern_rooted(q: *Query, i: u32) -> bool
+extern "ts_query_is_pattern_non_local" query_is_pattern_non_local(q: *Query, i: u32) -> bool
+extern "ts_query_is_pattern_guaranteed_at_step" query_is_pattern_guaranteed_at_step(q: *Query, byte_offset: u32) -> bool
 extern "ts_query_pattern_count" query_pattern_count(q: *Query) -> u32
 extern "ts_query_capture_count" query_capture_count(q: *Query) -> u32
 extern "ts_query_string_count" query_string_count(q: *Query) -> u32
@@ -220,6 +287,13 @@ extern "ts_query_disable_pattern" query_disable_pattern(q: *Query, i: u32)
 extern "ts_query_cursor_new" query_cursor_new() -> *QueryCursor
 extern "ts_query_cursor_delete" query_cursor_delete(c: *QueryCursor)
 extern "ts_query_cursor_exec" query_cursor_exec(c: *QueryCursor, q: *Query, n: Node)
+extern "ts_query_cursor_exec_with_options" query_cursor_exec_with_options(c: *QueryCursor, q: *Query, n: Node, options: *QueryCursorOptions)
+extern "ts_query_cursor_match_limit" query_cursor_match_limit(c: *QueryCursor) -> u32
+extern "ts_query_cursor_set_point_range" query_cursor_set_point_range(c: *QueryCursor, start: Point, end: Point) -> bool
+extern "ts_query_cursor_set_containing_byte_range" query_cursor_set_containing_byte_range(c: *QueryCursor, start: u32, end: u32) -> bool
+extern "ts_query_cursor_set_containing_point_range" query_cursor_set_containing_point_range(c: *QueryCursor, start: Point, end: Point) -> bool
+extern "ts_query_cursor_remove_match" query_cursor_remove_match(c: *QueryCursor, id: u32)
+extern "ts_query_cursor_set_max_start_depth" query_cursor_set_max_start_depth(c: *QueryCursor, depth: u32)
 extern "ts_query_cursor_did_exceed_match_limit" query_cursor_did_exceed_match_limit(c: *QueryCursor) -> bool
 extern "ts_query_cursor_set_match_limit" query_cursor_set_match_limit(c: *QueryCursor, limit: u32)
 extern "ts_query_cursor_set_byte_range" query_cursor_set_byte_range(c: *QueryCursor, start: u32, end: u32) -> bool
@@ -239,3 +313,21 @@ extern "ts_language_symbol_for_name" language_symbol_for_name(l: *Language, name
 extern "ts_language_field_count" language_field_count(l: *Language) -> u32
 extern "ts_language_field_name_for_id" language_field_name_for_id(l: *Language, id: u16) -> *u8
 extern "ts_language_field_id_for_name" language_field_id_for_name(l: *Language, name: *u8, length: u32) -> u16
+extern "ts_language_is_parseable" language_is_parseable(l: *Language) -> bool
+extern "ts_language_is_wasm" language_is_wasm(l: *Language) -> bool
+extern "ts_language_state_count" language_state_count(l: *Language) -> u32
+extern "ts_language_supertypes" language_supertypes(l: *Language, length: *u32) -> *u16
+extern "ts_language_subtypes" language_subtypes(l: *Language, supertype: u16, length: *u32) -> *u16
+extern "ts_language_metadata" language_metadata(l: *Language) -> *LanguageMetadata
+extern "ts_language_next_state" language_next_state(l: *Language, state: u16, symbol: u16) -> u16
+
+// ## Lookahead iterator
+
+extern "ts_lookahead_iterator_new" lookahead_iterator_new(l: *Language, state: u16) -> *LookaheadIterator
+extern "ts_lookahead_iterator_delete" lookahead_iterator_delete(it: *LookaheadIterator)
+extern "ts_lookahead_iterator_reset_state" lookahead_iterator_reset_state(it: *LookaheadIterator, state: u16) -> bool
+extern "ts_lookahead_iterator_reset" lookahead_iterator_reset(it: *LookaheadIterator, l: *Language, state: u16) -> bool
+extern "ts_lookahead_iterator_language" lookahead_iterator_language(it: *LookaheadIterator) -> *Language
+extern "ts_lookahead_iterator_next" lookahead_iterator_next(it: *LookaheadIterator) -> bool
+extern "ts_lookahead_iterator_current_symbol" lookahead_iterator_current_symbol(it: *LookaheadIterator) -> u16
+extern "ts_lookahead_iterator_current_symbol_name" lookahead_iterator_current_symbol_name(it: *LookaheadIterator) -> *u8
